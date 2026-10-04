@@ -43,6 +43,11 @@ final class ProductAdmin {
 			'admin_menu',
 			array( $this, 'register_menu' )
 		);
+
+		add_action(
+			'admin_head',
+			array( $this, 'hide_edit_product_submenu' )
+		);
 	}
 
 	/**
@@ -80,13 +85,30 @@ final class ProductAdmin {
 		);
 
 		add_submenu_page(
-			null,
+			'dropkey-wp-products',
 			__( 'Edit Product', 'dropkey-wp' ),
 			__( 'Edit Product', 'dropkey-wp' ),
 			'manage_options',
 			'dropkey-wp-product-edit',
 			array( $this, 'render_edit_product_page' )
 		);
+	}
+
+	/**
+	 * Hide the edit product submenu item from the admin menu.
+	 *
+	 * The page remains registered and directly accessible.
+	 *
+	 * @return void
+	 */
+	public function hide_edit_product_submenu() {
+		?>
+		<style>
+			#toplevel_page_dropkey-wp-products .wp-submenu a[href*="page=dropkey-wp-product-edit"] {
+				display: none;
+			}
+		</style>
+		<?php
 	}
 
 	/**
@@ -241,7 +263,7 @@ final class ProductAdmin {
 			$result = $this->handle_create_product();
 
 			if ( is_wp_error( $result ) ) {
-				$errors   = $result->get_error_messages();
+				$errors    = $result->get_error_messages();
 				$form_data = $this->get_post_form_data();
 			}
 		}
@@ -638,7 +660,7 @@ final class ProductAdmin {
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'page'   => 'dropkey-wp-products',
+					'page'    => 'dropkey-wp-products',
 					'updated' => '1',
 				),
 				admin_url( 'admin.php' )
