@@ -11,6 +11,7 @@ use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
+use DropKeyWP\Domain\Plan;
 use DropKeyWP\Domain\PlanStatus;
 use DropKeyWP\Domain\ProductStatus;
 use DropKeyWP\Domain\Subscription;
@@ -79,12 +80,12 @@ final class CreateSubscriptionCheckout {
 	}
 
 	/**
-	 * Create a gateway checkout and local pending subscription.
+	 * Create a subscription checkout.
 	 *
-	 * Only active products and active plans may enter checkout.
-	 * Redirect URLs are restricted to the site's own origin.
+	 * Free plans are fulfilled locally and immediately. Paid plans
+	 * continue through the selected payment gateway.
 	 *
-	 * @param array $data Checkout data.
+	 * @param array<string,mixed> $data Checkout data.
 	 * @return array|\WP_Error
 	 */
 	public function execute( array $data ) {
@@ -125,13 +126,6 @@ final class CreateSubscriptionCheckout {
 			);
 		}
 
-		if ( '' === $gateway_id ) {
-			return new \WP_Error(
-				'dropkey_checkout_gateway_required',
-				__( 'A payment gateway is required.', 'dropkey-wp' )
-			);
-		}
-
 		$customer = $this->customers->find( $customer_id );
 
 		if ( ! $customer ) {
@@ -150,13 +144,6 @@ final class CreateSubscriptionCheckout {
 			);
 		}
 
-		/*
-		 * The checkout application is the final business-rule boundary.
-		 *
-		 * The frontend only displays active products/plans, but the REST
-		 * endpoint can be called directly. Never rely on the frontend to
-		 * enforce commercial availability.
-		 */
 		if ( ProductStatus::ACTIVE !== $product->get_status() ) {
 			return new \WP_Error(
 				'dropkey_checkout_product_unavailable',
@@ -193,6 +180,27 @@ final class CreateSubscriptionCheckout {
 					'The selected plan does not belong to the selected product.',
 					'dropkey-wp'
 				)
+			);
+		}
+
+		/*
+		 * Free plans never enter the payment gateway layer.
+		 *
+		 * The application boundary decides that the plan is free;
+		 * the frontend is not trusted to make this determination.
+		 */
+		if ( $plan->is_free() ) {
+			return $this->create_free_subscription(
+				$customer,
+				$product,
+				$plan
+			);
+		}
+
+		if ( '' === $gateway_id ) {
+			return new \WP_Error(
+				'dropkey_checkout_gateway_required',
+				__( 'A payment gateway is required for paid plans.', 'dropkey-wp' )
 			);
 		}
 
@@ -312,8 +320,8 @@ final class CreateSubscriptionCheckout {
 				'current_period_end'     => null,
 				'cancel_at_period_end'   => false,
 				'cancelled_at'           => null,
-				'past_due_at'             => null,
-				'ended_at'                => null,
+				'past_due_at'            => null,
+				'ended_at'               => null,
 			)
 		);
 
@@ -337,7 +345,7 @@ final class CreateSubscriptionCheckout {
 				'plan_id'                 => $subscription->get_plan_id(),
 				'gateway'                => $subscription->get_gateway(),
 				'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
-				'status'                  => $subscription->get_status(),
+				'status'                 => $subscription->get_status(),
 				'current_period_start'    => $subscription->get_current_period_start(),
 				'current_period_end'      => $subscription->get_current_period_end(),
 				'cancel_at_period_end'    => $subscription->get_cancel_at_period_end(),
@@ -348,12 +356,6 @@ final class CreateSubscriptionCheckout {
 		);
 
 		if ( is_wp_error( $created_subscription ) ) {
-			/*
-			 * A concurrent request may have successfully created the
-			 * same local subscription between our initial lookup and
-			 * this insert. Recover the winner before compensating the
-			 * provider subscription.
-			 */
 			$existing_subscription =
 				$this->subscriptions->find_by_gateway_subscription_id(
 					$gateway_id,
@@ -374,11 +376,6 @@ final class CreateSubscriptionCheckout {
 				return $result;
 			}
 
-			/*
-			 * The provider resource now exists, but local persistence
-			 * failed. Attempt to cancel the provider subscription so
-			 * it cannot continue into a billable orphaned state.
-			 */
 			$this->compensate_gateway_subscription(
 				$gateway,
 				$gateway_subscription_id,
@@ -411,11 +408,192 @@ final class CreateSubscriptionCheckout {
 	}
 
 	/**
-	 * Validate checkout redirect URLs.
+	 * Create an immediately active free subscription.
 	 *
-	 * Only URLs belonging to the site's configured origin are accepted.
-	 * Empty values remain valid because gateways may provide their own
-	 * defaults when no application return destination is supplied.
+	 * A free subscription is perpetual for the current MVP. It does
+	 * not have a billing period end and does not require a provider.
+	 *
+	 * The advisory lock serializes concurrent attempts to obtain the
+	 * same free plan and prevents duplicate subscriptions/licenses.
+	 *
+	 * @param object $customer Customer entity.
+	 * @param object $product  Product entity.
+	 * @param Plan   $plan     Plan entity.
+	 * @return array|\WP_Error
+	 */
+	private function create_free_subscription(
+		$customer,
+		$product,
+		Plan $plan
+	) {
+		global $wpdb;
+
+		$lock_name = $this->get_free_subscription_lock_name(
+			$customer->get_id(),
+			$product->get_id(),
+			$plan->get_id()
+		);
+
+		$lock_result = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT GET_LOCK( %s, %d )',
+				$lock_name,
+				10
+			)
+		);
+
+		if ( '1' !== (string) $lock_result ) {
+			return new \WP_Error(
+				'dropkey_free_subscription_locked',
+				__(
+					'This free plan is currently being processed. Please try again.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		try {
+			/*
+			 * Re-check existing customer subscriptions while holding
+			 * the lock. A free plan is obtained only once for a given
+			 * customer/product/plan combination.
+			 */
+			$existing_subscriptions = $this->subscriptions->all_by_customer(
+				$customer->get_id()
+			);
+
+			foreach ( $existing_subscriptions as $existing_subscription ) {
+				if (
+					(int) $existing_subscription->get_product_id() === (int) $product->get_id()
+					&&
+					(int) $existing_subscription->get_plan_id() === (int) $plan->get_id()
+					&&
+					Subscription::STATUS_EXPIRED !== $existing_subscription->get_status()
+				) {
+					return array(
+						'gateway'              => 'free',
+						'free'                 => true,
+						'subscription_id'      => $existing_subscription->get_id(),
+						'local_subscription'   => $existing_subscription,
+						'approval_url'         => '',
+					);
+				}
+			}
+
+			$subscription_reference = 'free-' . wp_generate_uuid4();
+			$period_start           = current_time( 'mysql', true );
+
+			$subscription = new Subscription(
+				array(
+					'customer_id'             => $customer->get_id(),
+					'product_id'              => $product->get_id(),
+					'plan_id'                 => $plan->get_id(),
+					'gateway'                => 'free',
+					'gateway_subscription_id' => $subscription_reference,
+					'status'                 => Subscription::STATUS_ACTIVE,
+					'current_period_start'   => $period_start,
+					'current_period_end'     => null,
+					'cancel_at_period_end'   => false,
+					'cancelled_at'           => null,
+					'past_due_at'            => null,
+					'ended_at'               => null,
+				)
+			);
+
+			$validation = $subscription->validate();
+
+			if ( is_wp_error( $validation ) ) {
+				return $validation;
+			}
+
+			$created_subscription = $this->subscriptions->create(
+				array(
+					'customer_id'             => $subscription->get_customer_id(),
+					'product_id'              => $subscription->get_product_id(),
+					'plan_id'                 => $subscription->get_plan_id(),
+					'gateway'                => $subscription->get_gateway(),
+					'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
+					'status'                 => $subscription->get_status(),
+					'current_period_start'    => $subscription->get_current_period_start(),
+					'current_period_end'      => $subscription->get_current_period_end(),
+					'cancel_at_period_end'    => $subscription->get_cancel_at_period_end(),
+					'cancelled_at'            => $subscription->get_cancelled_at(),
+					'past_due_at'             => $subscription->get_past_due_at(),
+					'ended_at'                => $subscription->get_ended_at(),
+				)
+			);
+
+			if ( is_wp_error( $created_subscription ) ) {
+				/*
+				 * The unique gateway/reference combination makes the
+				 * generated reference collision-safe. A database
+				 * failure remains a real checkout failure.
+				 */
+				return $created_subscription;
+			}
+
+			/*
+			 * Reuse the normal lifecycle pipeline.
+			 *
+			 * Plugin.php already listens for this action and will:
+			 * 1. create the license;
+			 * 2. synchronize the entitlement.
+			 */
+			do_action(
+				'dropkey_wp_subscription_activated',
+				$created_subscription->get_id()
+			);
+
+			$result = array(
+				'gateway'              => 'free',
+				'free'                 => true,
+				'subscription_id'      => $created_subscription->get_id(),
+				'local_subscription'   => $created_subscription,
+				'approval_url'         => '',
+			);
+
+			do_action(
+				'dropkey_wp_subscription_checkout_created',
+				$result,
+				$created_subscription
+			);
+
+			return $result;
+		} finally {
+			/*
+			 * RELEASE_LOCK() must use the same database connection
+			 * that acquired the advisory lock.
+			 */
+			$wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT RELEASE_LOCK( %s )',
+					$lock_name
+				)
+			);
+		}
+	}
+
+	/**
+	 * Generate the free subscription concurrency lock name.
+	 *
+	 * @param int $customer_id Customer ID.
+	 * @param int $product_id  Product ID.
+	 * @param int $plan_id     Plan ID.
+	 * @return string
+	 */
+	private function get_free_subscription_lock_name(
+		$customer_id,
+		$product_id,
+		$plan_id
+	) {
+		return 'dropkey_free_checkout_' .
+			absint( $customer_id ) . '_' .
+			absint( $product_id ) . '_' .
+			absint( $plan_id );
+	}
+
+	/**
+	 * Validate checkout redirect URLs.
 	 *
 	 * @param string $return_url Return URL.
 	 * @param string $cancel_url Cancel URL.
@@ -538,8 +716,7 @@ final class CreateSubscriptionCheckout {
 	}
 
 	/**
-	 * Attempt to compensate for a provider subscription when local
-	 * subscription persistence cannot be completed.
+	 * Attempt to compensate for a provider subscription.
 	 *
 	 * @param object    $gateway                  Payment gateway.
 	 * @param string    $gateway_subscription_id Provider subscription ID.
@@ -605,10 +782,6 @@ final class CreateSubscriptionCheckout {
 	/**
 	 * Record a failed provider compensation attempt.
 	 *
-	 * The local persistence error remains the primary checkout error.
-	 * Compensation failure is separately observable so it can be
-	 * investigated without hiding the original failure.
-	 *
 	 * @param string    $gateway_id              Gateway ID.
 	 * @param string    $gateway_subscription_id Provider subscription ID.
 	 * @param \WP_Error $local_error             Local persistence error.
@@ -641,7 +814,7 @@ final class CreateSubscriptionCheckout {
 	}
 
 	/**
-	 * Extract the provider subscription ID from a gateway response.
+	 * Extract the provider subscription ID.
 	 *
 	 * @param array $result Gateway checkout response.
 	 * @return string

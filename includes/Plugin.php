@@ -102,7 +102,8 @@ final class Plugin {
 
 		$synchronize_subscription_entitlement =
 			new SynchronizeSubscriptionEntitlement(
-				$license_repository
+				$license_repository,
+				$plan_repository
 			);
 
 		add_action(
@@ -226,7 +227,8 @@ final class Plugin {
 		if ( is_admin() ) {
 
 			$product_admin = new ProductAdmin(
-				$product_repository
+				$product_repository,
+				$plan_repository
 			);
 
 			$product_admin->register();

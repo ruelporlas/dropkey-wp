@@ -8,6 +8,7 @@
 namespace DropKeyWP\Application;
 
 use DropKeyWP\Database\Repositories\LicenseRepository;
+use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Domain\License;
 use DropKeyWP\Domain\Subscription;
 
@@ -15,22 +16,36 @@ defined( 'ABSPATH' ) || exit;
 
 final class SynchronizeSubscriptionEntitlement {
 
+	/**
+	 * License repository.
+	 *
+	 * @var LicenseRepository
+	 */
 	private $licenses;
+
+	/**
+	 * Plan repository.
+	 *
+	 * @var PlanRepository
+	 */
+	private $plans;
 
 	/**
 	 * Constructor.
 	 *
 	 * @param LicenseRepository $licenses License repository.
+	 * @param PlanRepository    $plans    Plan repository.
 	 */
-	public function __construct( LicenseRepository $licenses ) {
+	public function __construct(
+		LicenseRepository $licenses,
+		PlanRepository $plans
+	) {
 		$this->licenses = $licenses;
+		$this->plans    = $plans;
 	}
 
 	/**
 	 * Synchronize the license associated with a subscription.
-	 *
-	 * A revoked license is an administrative terminal state and must
-	 * never be automatically restored by subscription activity.
 	 *
 	 * @param Subscription $subscription Subscription.
 	 * @return License|null|\WP_Error
@@ -44,11 +59,6 @@ final class SynchronizeSubscriptionEntitlement {
 			return null;
 		}
 
-		/*
-		 * Revocation is an explicit administrative decision. Payment
-		 * success, renewal, or subscription status changes must not
-		 * silently undo it.
-		 */
 		if ( License::STATUS_REVOKED === $license->get_status() ) {
 			return $license;
 		}
@@ -57,13 +67,6 @@ final class SynchronizeSubscriptionEntitlement {
 			$subscription->get_status()
 		);
 
-		/*
-		 * Some subscription states intentionally do not change
-		 * the license entitlement.
-		 *
-		 * In particular, cancellation is not entitlement loss.
-		 * The license remains active until the paid period ends.
-		 */
 		if ( null === $license_status ) {
 			return $license;
 		}
@@ -71,11 +74,21 @@ final class SynchronizeSubscriptionEntitlement {
 		$expires_at = $subscription->get_current_period_end();
 
 		/*
-		 * A license entitlement must have a corresponding subscription
-		 * period end. Do not overwrite an existing valid expiry with
-		 * an empty value.
+		 * A free plan is perpetual for the current MVP. Its
+		 * subscription has no billing period end, so its license
+		 * expiration must also remain null.
+		 *
+		 * Paid subscriptions still require a real billing period end.
 		 */
-		if ( '' === $expires_at || null === $expires_at ) {
+		$plan = $this->plans->find(
+			$subscription->get_plan_id()
+		);
+
+		if (
+			( null === $expires_at || '' === $expires_at )
+			&&
+			( ! $plan || ! $plan->is_free() )
+		) {
 			$error = new \WP_Error(
 				'dropkey_license_expiry_missing',
 				__(
@@ -93,12 +106,6 @@ final class SynchronizeSubscriptionEntitlement {
 			return $error;
 		}
 
-		/*
-		 * Keep the operation idempotent. Repeated gateway events should
-		 * not generate unnecessary database writes or repeated license
-		 * transition actions when both the status and expiry are already
-		 * synchronized.
-		 */
 		if (
 			$license->get_status() === $license_status
 			&& $license->get_expires_at() === $expires_at
@@ -122,21 +129,10 @@ final class SynchronizeSubscriptionEntitlement {
 			return $updated;
 		}
 
-		/*
-		 * Only fire a status action when the license status actually
-		 * changed. A billing-period renewal that merely extends the
-		 * expiry must not be treated as a new license activation.
-		 */
 		if ( $license->get_status() !== $updated->get_status() ) {
 			$this->fire_status_action( $updated );
 		}
 
-		/**
-		 * Fires after a subscription entitlement has been synchronized.
-		 *
-		 * @param License      $updated_subscription_license Updated license.
-		 * @param Subscription $subscription                 Subscription.
-		 */
 		do_action(
 			'dropkey_wp_subscription_entitlement_synchronized',
 			$updated,
@@ -148,11 +144,6 @@ final class SynchronizeSubscriptionEntitlement {
 
 	/**
 	 * Handle an entitlement synchronization failure.
-	 *
-	 * Synchronization runs from lifecycle actions in some cases, where
-	 * a WP_Error return value cannot be consumed by the caller. Logging
-	 * and a dedicated action preserve observability without reversing
-	 * the already-successful subscription status change.
 	 *
 	 * @param Subscription $subscription Subscription.
 	 * @param License      $license      Existing license.
@@ -173,13 +164,6 @@ final class SynchronizeSubscriptionEntitlement {
 			)
 		);
 
-		/**
-		 * Fires when subscription entitlement synchronization fails.
-		 *
-		 * @param \WP_Error    $error        Synchronization error.
-		 * @param Subscription $subscription Subscription.
-		 * @param License      $license      Existing license.
-		 */
 		do_action(
 			'dropkey_wp_subscription_entitlement_sync_failed',
 			$error,

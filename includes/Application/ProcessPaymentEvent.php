@@ -66,7 +66,8 @@ final class ProcessPaymentEvent {
 
 		$this->synchronize_entitlement =
 			new SynchronizeSubscriptionEntitlement(
-				$licenses
+				$licenses,
+				$plan_repository
 			);
 	}
 

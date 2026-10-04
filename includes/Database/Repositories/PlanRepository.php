@@ -69,7 +69,10 @@ final class PlanRepository {
 	public function find_by_product_and_slug( $product_id, $slug ) {
 		$row = $this->wpdb->get_row(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->table} WHERE product_id = %d AND slug = %s LIMIT 1",
+				"SELECT * FROM {$this->table}
+				WHERE product_id = %d
+				AND slug = %s
+				LIMIT 1",
 				$product_id,
 				$slug
 			),
@@ -94,7 +97,10 @@ final class PlanRepository {
 		if ( '' !== $status ) {
 			$rows = $this->wpdb->get_results(
 				$this->wpdb->prepare(
-					"SELECT * FROM {$this->table} WHERE product_id = %d AND status = %s ORDER BY id DESC",
+					"SELECT * FROM {$this->table}
+					WHERE product_id = %d
+					AND status = %s
+					ORDER BY id DESC",
 					$product_id,
 					$status
 				),
@@ -103,7 +109,9 @@ final class PlanRepository {
 		} else {
 			$rows = $this->wpdb->get_results(
 				$this->wpdb->prepare(
-					"SELECT * FROM {$this->table} WHERE product_id = %d ORDER BY id DESC",
+					"SELECT * FROM {$this->table}
+					WHERE product_id = %d
+					ORDER BY id DESC",
 					$product_id
 				),
 				ARRAY_A
@@ -138,6 +146,7 @@ final class PlanRepository {
 				'product_id'             => $data['product_id'],
 				'name'                   => $data['name'],
 				'slug'                   => $data['slug'],
+				'pricing_type'           => $data['pricing_type'],
 				'price'                  => $data['price'],
 				'currency'               => $data['currency'],
 				'billing_interval'       => $data['billing_interval'],
@@ -149,6 +158,7 @@ final class PlanRepository {
 			),
 			array(
 				'%d',
+				'%s',
 				'%s',
 				'%s',
 				'%s',
@@ -191,6 +201,7 @@ final class PlanRepository {
 				'product_id'             => $data['product_id'],
 				'name'                   => $data['name'],
 				'slug'                   => $data['slug'],
+				'pricing_type'           => $data['pricing_type'],
 				'price'                  => $data['price'],
 				'currency'               => $data['currency'],
 				'billing_interval'       => $data['billing_interval'],
@@ -204,6 +215,7 @@ final class PlanRepository {
 			),
 			array(
 				'%d',
+				'%s',
 				'%s',
 				'%s',
 				'%s',

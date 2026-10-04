@@ -97,6 +97,10 @@ final class UpdatePlan {
 			? sanitize_title( $data['slug'] )
 			: sanitize_title( $name );
 
+		$pricing_type = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
+			: $existing_plan->get_pricing_type();
+
 		$price = isset( $data['price'] )
 			? trim( (string) $data['price'] )
 			: $existing_plan->get_price();
@@ -121,6 +125,12 @@ final class UpdatePlan {
 			? sanitize_key( $data['status'] )
 			: $existing_plan->get_status();
 
+		if ( Plan::PRICING_TYPE_FREE === $pricing_type ) {
+			$price                  = '0.0000';
+			$billing_interval       = '';
+			$billing_interval_count = 0;
+		}
+
 		$data = apply_filters(
 			'dropkey_wp_plan_update_data',
 			array(
@@ -128,6 +138,7 @@ final class UpdatePlan {
 				'product_id'             => $product_id,
 				'name'                   => $name,
 				'slug'                   => $slug,
+				'pricing_type'           => $pricing_type,
 				'price'                  => $price,
 				'currency'               => $currency,
 				'billing_interval'       => $billing_interval,
@@ -149,6 +160,10 @@ final class UpdatePlan {
 		$slug = isset( $data['slug'] )
 			? sanitize_title( $data['slug'] )
 			: sanitize_title( $name );
+
+		$pricing_type = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
+			: '';
 
 		$price = isset( $data['price'] )
 			? trim( (string) $data['price'] )
@@ -173,6 +188,16 @@ final class UpdatePlan {
 		$status = isset( $data['status'] )
 			? sanitize_key( $data['status'] )
 			: '';
+
+		/*
+		 * Normalize again after the filter because extensions may
+		 * change the pricing type.
+		 */
+		if ( Plan::PRICING_TYPE_FREE === $pricing_type ) {
+			$price                  = '0.0000';
+			$billing_interval       = '';
+			$billing_interval_count = 0;
+		}
 
 		if ( $product_id < 1 ) {
 			return new \WP_Error(
@@ -217,7 +242,10 @@ final class UpdatePlan {
 			);
 		}
 
-		if ( ! BillingInterval::is_valid( $billing_interval ) ) {
+		if (
+			Plan::PRICING_TYPE_PAID === $pricing_type
+			&& ! BillingInterval::is_valid( $billing_interval )
+		) {
 			return new \WP_Error(
 				'dropkey_plan_billing_interval_invalid',
 				__( 'Billing interval is invalid.', 'dropkey-wp' )
@@ -237,6 +265,7 @@ final class UpdatePlan {
 				'product_id'             => $product_id,
 				'name'                   => $name,
 				'slug'                   => $slug,
+				'pricing_type'           => $pricing_type,
 				'price'                  => $price,
 				'currency'               => $currency,
 				'billing_interval'       => $billing_interval,
@@ -260,6 +289,7 @@ final class UpdatePlan {
 				'product_id'             => $plan->get_product_id(),
 				'name'                   => $plan->get_name(),
 				'slug'                   => $plan->get_slug(),
+				'pricing_type'           => $plan->get_pricing_type(),
 				'price'                  => $plan->get_price(),
 				'currency'               => $plan->get_currency(),
 				'billing_interval'       => $plan->get_billing_interval(),

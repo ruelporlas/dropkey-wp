@@ -46,6 +46,9 @@ final class CreatePlan {
 	/**
 	 * Create a plan.
 	 *
+	 * Free plans are normalized to zero price and no billing
+	 * interval before domain validation and persistence.
+	 *
 	 * @param array<string,mixed> $data Plan data.
 	 * @return Plan|\WP_Error
 	 */
@@ -76,6 +79,10 @@ final class CreatePlan {
 			? sanitize_title( $data['slug'] )
 			: sanitize_title( $name );
 
+		$pricing_type = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
+			: Plan::PRICING_TYPE_PAID;
+
 		$price = isset( $data['price'] )
 			? trim( (string) $data['price'] )
 			: '0.0000';
@@ -100,12 +107,25 @@ final class CreatePlan {
 			? sanitize_key( $data['status'] )
 			: Plan::STATUS_ACTIVE;
 
+		/*
+		 * Free plans are not recurring payment plans.
+		 *
+		 * Normalize these values at the application boundary rather
+		 * than relying on browser-side field visibility.
+		 */
+		if ( Plan::PRICING_TYPE_FREE === $pricing_type ) {
+			$price                  = '0.0000';
+			$billing_interval       = '';
+			$billing_interval_count = 0;
+		}
+
 		$data = apply_filters(
 			'dropkey_wp_plan_data',
 			array(
 				'product_id'             => $product_id,
 				'name'                   => $name,
 				'slug'                   => $slug,
+				'pricing_type'           => $pricing_type,
 				'price'                  => $price,
 				'currency'               => $currency,
 				'billing_interval'       => $billing_interval,
@@ -125,6 +145,10 @@ final class CreatePlan {
 
 		$slug = isset( $data['slug'] )
 			? sanitize_title( $data['slug'] )
+			: '';
+
+		$pricing_type = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
 			: '';
 
 		$price = isset( $data['price'] )
@@ -151,11 +175,23 @@ final class CreatePlan {
 			? sanitize_key( $data['status'] )
 			: '';
 
+		/*
+		 * A filter may intentionally change the pricing type, so
+		 * normalize again after the filter before constructing the
+		 * domain entity.
+		 */
+		if ( Plan::PRICING_TYPE_FREE === $pricing_type ) {
+			$price                  = '0.0000';
+			$billing_interval       = '';
+			$billing_interval_count = 0;
+		}
+
 		$plan = new Plan(
 			array(
 				'product_id'             => $product_id,
 				'name'                   => $name,
 				'slug'                   => $slug,
+				'pricing_type'           => $pricing_type,
 				'price'                  => $price,
 				'currency'               => $currency,
 				'billing_interval'       => $billing_interval,
@@ -190,6 +226,7 @@ final class CreatePlan {
 				'product_id'             => $plan->get_product_id(),
 				'name'                   => $plan->get_name(),
 				'slug'                   => $plan->get_slug(),
+				'pricing_type'           => $plan->get_pricing_type(),
 				'price'                  => $plan->get_price(),
 				'currency'               => $plan->get_currency(),
 				'billing_interval'       => $plan->get_billing_interval(),
@@ -203,7 +240,10 @@ final class CreatePlan {
 			return $created_plan;
 		}
 
-		do_action( 'dropkey_wp_plan_created', $created_plan );
+		do_action(
+			'dropkey_wp_plan_created',
+			$created_plan
+		);
 
 		return $created_plan;
 	}
