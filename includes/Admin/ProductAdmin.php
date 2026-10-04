@@ -96,7 +96,7 @@ final class ProductAdmin {
 		);
 
 		add_submenu_page(
-			'options.php',
+			'dropkey-wp-products',
 			__( 'Edit Product', 'dropkey-wp' ),
 			__( 'Edit Product', 'dropkey-wp' ),
 			'manage_options',
@@ -281,9 +281,9 @@ final class ProductAdmin {
 	 */
 	private function render_status_filters( $current_status ) {
 		$filters = array(
-			''                        => __( 'All', 'dropkey-wp' ),
-			ProductStatus::ACTIVE     => __( 'Active', 'dropkey-wp' ),
-			ProductStatus::ARCHIVED   => __( 'Archived', 'dropkey-wp' ),
+			''                      => __( 'All', 'dropkey-wp' ),
+			ProductStatus::ACTIVE   => __( 'Active', 'dropkey-wp' ),
+			ProductStatus::ARCHIVED => __( 'Archived', 'dropkey-wp' ),
 		);
 
 		?>
@@ -780,7 +780,7 @@ final class ProductAdmin {
 						'product_id' => $product_id,
 						'error'      => $error_token,
 					),
-					admin_url( 'options.php' )
+					admin_url( 'admin.php' )
 				)
 			);
 
@@ -794,7 +794,7 @@ final class ProductAdmin {
 					'product_id' => $product_id,
 					'updated'    => '1',
 				),
-				admin_url( 'options.php' )
+				admin_url( 'admin.php' )
 			)
 		);
 
@@ -851,7 +851,7 @@ final class ProductAdmin {
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'page'  => 'dropkey-wp-products',
+					'page'         => 'dropkey-wp-products',
 					'status_notice' => $notice,
 				),
 				admin_url( 'admin.php' )
@@ -1100,7 +1100,7 @@ final class ProductAdmin {
 				'page'       => 'dropkey-wp-product-edit',
 				'product_id' => absint( $product_id ),
 			),
-			admin_url( 'options.php' )
+			admin_url( 'admin.php' )
 		);
 	}
 

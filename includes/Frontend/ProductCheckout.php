@@ -91,10 +91,6 @@ final class ProductCheckout {
 			'</p>';
 		}
 
-		/*
-		 * Handle the return from the payment provider before rendering
-		 * the normal checkout form.
-		 */
 		$checkout_state = $this->get_checkout_state(
 			$subscriptions,
 			$product_id
@@ -125,6 +121,19 @@ final class ProductCheckout {
 
 		$return_url = esc_url_raw( $return_url );
 
+		/*
+		 * Keep the provider cancellation destination distinct from the
+		 * normal approval return destination so the frontend can render
+		 * a meaningful cancellation state.
+		 */
+		$cancel_url = add_query_arg(
+			'cancel',
+			'1',
+			$return_url
+		);
+
+		$cancel_url = esc_url_raw( $cancel_url );
+
 		$account_url = $this->get_account_url();
 
 		ob_start();
@@ -151,7 +160,13 @@ final class ProductCheckout {
 
 			<?php if ( $checkout_state ) : ?>
 
-				<?php $this->render_checkout_state( $checkout_state, $account_url, $return_url ); ?>
+				<?php
+				$this->render_checkout_state(
+					$checkout_state,
+					$account_url,
+					$return_url
+				);
+				?>
 
 			<?php elseif ( empty( $active_plans ) ) : ?>
 
@@ -390,7 +405,7 @@ final class ProductCheckout {
 										),
 										gateway: gateway.value,
 										return_url: <?php echo wp_json_encode( $return_url ); ?>,
-										cancel_url: <?php echo wp_json_encode( $return_url ); ?>
+										cancel_url: <?php echo wp_json_encode( $cancel_url ); ?>
 									})
 								}
 							)
@@ -446,12 +461,116 @@ final class ProductCheckout {
 		<?php endif; ?>
 
 		<style>
+			.dropkey-product-checkout {
+				width: 100%;
+				max-width: 760px;
+				margin: 32px auto;
+				color: #1d2327;
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			}
+
+			.dropkey-product-checkout *,
+			.dropkey-product-checkout *::before,
+			.dropkey-product-checkout *::after {
+				box-sizing: border-box;
+			}
+
+			.dropkey-product-header,
+			.dropkey-checkout-form,
 			.dropkey-checkout-result {
-				margin: 24px 0;
-				padding: 24px;
-				border: 1px solid #dcdcde;
-				border-radius: 12px;
+				padding: 28px;
+				border: 1px solid #e2e4e7;
+				border-radius: 14px;
 				background: #fff;
+				box-shadow: 0 3px 16px rgba(29, 35, 39, .04);
+			}
+
+			.dropkey-product-header h2 {
+				margin: 0;
+				font-size: 28px;
+				line-height: 1.2;
+			}
+
+			.dropkey-product-description {
+				margin-top: 14px;
+				color: #646970;
+				line-height: 1.65;
+			}
+
+			.dropkey-checkout-form {
+				margin-top: 16px;
+			}
+
+			.dropkey-checkout-plans h3,
+			.dropkey-checkout-gateways h3 {
+				margin: 0 0 12px;
+				font-size: 16px;
+			}
+
+			.dropkey-plan-option,
+			.dropkey-gateway-option {
+				display: flex;
+				align-items: center;
+				gap: 12px;
+				padding: 15px;
+				margin-bottom: 8px;
+				border: 1px solid #dcdcde;
+				border-radius: 9px;
+				cursor: pointer;
+			}
+
+			.dropkey-plan-option:hover,
+			.dropkey-gateway-option:hover {
+				border-color: #8c8f94;
+			}
+
+			.dropkey-plan-name {
+				flex: 1;
+				font-weight: 600;
+			}
+
+			.dropkey-plan-price {
+				color: #50575e;
+				font-size: 14px;
+				white-space: nowrap;
+			}
+
+			.dropkey-checkout-gateways {
+				margin-top: 26px;
+			}
+
+			.dropkey-checkout-submit {
+				width: 100%;
+				min-height: 46px;
+				margin-top: 18px;
+				padding: 10px 18px;
+				border: 1px solid #2271b1;
+				border-radius: 8px;
+				background: #2271b1;
+				color: #fff;
+				font-size: 14px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			.dropkey-checkout-submit:hover {
+				background: #135e96;
+				border-color: #135e96;
+			}
+
+			.dropkey-checkout-submit:disabled {
+				opacity: .65;
+				cursor: wait;
+			}
+
+			.dropkey-checkout-message {
+				margin-top: 12px;
+				color: #646970;
+				font-size: 13px;
+			}
+
+			.dropkey-checkout-result {
+				margin-top: 16px;
 			}
 
 			.dropkey-checkout-result h3 {
@@ -460,6 +579,7 @@ final class ProductCheckout {
 
 			.dropkey-checkout-result p {
 				margin: 0 0 16px;
+				line-height: 1.6;
 			}
 
 			.dropkey-checkout-reference {
@@ -468,6 +588,7 @@ final class ProductCheckout {
 				border-radius: 8px;
 				background: #f6f7f7;
 				font-size: 14px;
+				overflow-wrap: anywhere;
 			}
 
 			.dropkey-checkout-actions {
@@ -488,10 +609,20 @@ final class ProductCheckout {
 				color: #fff;
 			}
 
+			.dropkey-checkout-primary:hover {
+				background: #135e96;
+				color: #fff;
+			}
+
 			.dropkey-checkout-secondary {
 				border: 1px solid #c3c4c7;
 				color: #1d2327;
 				background: #fff;
+			}
+
+			.dropkey-checkout-secondary:hover {
+				color: #1d2327;
+				border-color: #8c8f94;
 			}
 
 			.dropkey-checkout-status {
@@ -503,17 +634,46 @@ final class ProductCheckout {
 				font-size: 13px;
 				font-weight: 600;
 			}
+
+			@media (max-width: 600px) {
+				.dropkey-product-checkout {
+					margin: 20px auto;
+				}
+
+				.dropkey-product-header,
+				.dropkey-checkout-form,
+				.dropkey-checkout-result {
+					padding: 20px;
+				}
+
+				.dropkey-product-header h2 {
+					font-size: 24px;
+				}
+
+				.dropkey-plan-option {
+					align-items: flex-start;
+					flex-wrap: wrap;
+				}
+
+				.dropkey-plan-price {
+					width: 100%;
+					margin-left: 25px;
+				}
+
+				.dropkey-checkout-actions {
+					flex-direction: column;
+				}
+
+				.dropkey-checkout-actions a {
+					text-align: center;
+				}
+			}
 		</style>
 
 		<?php
 
 		$output = ob_get_clean();
 
-		/*
-		 * Remove provider return parameters after the current request has
-		 * been rendered. This is cosmetic only and does not affect the
-		 * server-side subscription state.
-		 */
 		if ( $checkout_state ) {
 			$output .= $this->get_url_cleanup_script();
 		}
@@ -558,10 +718,6 @@ final class ProductCheckout {
 			$subscription_id
 		);
 
-		/*
-		 * Do not display a subscription belonging to another product if
-		 * the provider returns to a product checkout page.
-		 */
 		if (
 			$subscription &&
 			(int) $subscription->get_product_id() !== (int) $product_id
@@ -571,9 +727,9 @@ final class ProductCheckout {
 
 		if ( ! $subscription ) {
 			return array(
-				'type'            => 'processing',
-				'provider_id'     => $subscription_id,
-				'subscription'    => null,
+				'type'         => 'processing',
+				'provider_id'  => $subscription_id,
+				'subscription' => null,
 			);
 		}
 
@@ -587,7 +743,10 @@ final class ProductCheckout {
 			);
 		}
 
-		if ( 'cancelled' === $status || 'expired' === $status ) {
+		if (
+			'cancelled' === $status ||
+			'expired' === $status
+		) {
 			return array(
 				'type'         => 'inactive',
 				'provider_id'  => $subscription_id,
