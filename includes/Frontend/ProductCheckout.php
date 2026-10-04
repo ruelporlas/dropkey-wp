@@ -10,6 +10,7 @@ namespace DropKeyWP\Frontend;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
+use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Gateways\GatewayManager;
 
 defined( 'ABSPATH' ) || exit;
@@ -85,6 +86,22 @@ final class ProductCheckout {
 					'dropkey-wp'
 				) .
 			'</p>';
+		}
+
+		/*
+		 * Handle the return from the payment provider before rendering
+		 * the normal checkout form. This prevents the customer from
+		 * immediately seeing the purchase form again after approval.
+		 */
+		$checkout_return = $this->get_checkout_return_state(
+			$product_id
+		);
+
+		if ( ! empty( $checkout_return['is_return'] ) ) {
+			return $this->render_checkout_return(
+				$product,
+				$checkout_return
+			);
 		}
 
 		$active_plans = $plans->all_by_product(
@@ -426,6 +443,539 @@ final class ProductCheckout {
 		<?php
 
 		return ob_get_clean();
+	}
+
+	/**
+	 * Determine whether the current request is a checkout return.
+	 *
+	 * @param int $product_id Product ID.
+	 * @return array
+	 */
+	private function get_checkout_return_state( $product_id ) {
+		$subscription_id = '';
+
+		if ( isset( $_GET['subscription_id'] ) ) {
+			$subscription_id = sanitize_text_field(
+				wp_unslash( $_GET['subscription_id'] )
+			);
+		}
+
+		/*
+		 * PayPal may also return a token parameter. We intentionally do
+		 * not use or expose it. The provider subscription ID is the
+		 * useful identifier for reconciling the local subscription.
+		 */
+		$provider_token = '';
+
+		if ( isset( $_GET['token'] ) ) {
+			$provider_token = sanitize_text_field(
+				wp_unslash( $_GET['token'] )
+			);
+		}
+
+		$is_cancel = false;
+
+		if (
+			isset( $_GET['cancel'] )
+			&& '1' === sanitize_text_field(
+				wp_unslash( $_GET['cancel'] )
+			)
+		) {
+			$is_cancel = true;
+		}
+
+		/*
+		 * PayPal's cancel URL can arrive with a token but without a
+		 * subscription_id. Treat a token-only return as a possible
+		 * cancellation only when the request explicitly indicates one.
+		 */
+		if ( '' === $subscription_id && ! $is_cancel ) {
+			return array(
+				'is_return' => false,
+			);
+		}
+
+		$state = array(
+			'is_return'        => true,
+			'is_cancel'        => $is_cancel,
+			'subscription_id'  => $subscription_id,
+			'provider_token'   => $provider_token,
+			'local_subscription' => null,
+		);
+
+		if ( '' !== $subscription_id ) {
+			$subscriptions = new SubscriptionRepository(
+				$this->get_wpdb()
+			);
+
+			$subscription =
+				$subscriptions->find_by_gateway_subscription_id(
+					'paypal',
+					$subscription_id
+				);
+
+			if (
+				$subscription
+				&& $subscription->get_product_id() === absint( $product_id )
+			) {
+				$state['local_subscription'] = $subscription;
+			}
+		}
+
+		return $state;
+	}
+
+	/**
+	 * Render the post-checkout state.
+	 *
+	 * @param \DropKeyWP\Domain\Product $product Product entity.
+	 * @param array                     $state   Checkout return state.
+	 * @return string
+	 */
+	private function render_checkout_return( $product, array $state ) {
+		$subscription = isset( $state['local_subscription'] )
+			? $state['local_subscription']
+			: null;
+
+		$status = $subscription
+			? $subscription->get_status()
+			: '';
+
+		$account_url = $this->get_account_url();
+
+		if ( ! empty( $state['is_cancel'] ) ) {
+			$title = __(
+				'Checkout cancelled',
+				'dropkey-wp'
+			);
+
+			$message = __(
+				'Your payment approval was cancelled. No new DropKey WP subscription was activated from this checkout.',
+				'dropkey-wp'
+			);
+
+			$notice_class = 'dropkey-checkout-return--cancelled';
+		} elseif ( 'active' === $status ) {
+			$title = __(
+				'Subscription active',
+				'dropkey-wp'
+			);
+
+			$message = __(
+				'Your subscription is active. Your DropKey WP license should now be available in your customer account.',
+				'dropkey-wp'
+			);
+
+			$notice_class = 'dropkey-checkout-return--success';
+		} elseif ( 'cancelled' === $status || 'expired' === $status ) {
+			$title = __(
+				'Subscription was not activated',
+				'dropkey-wp'
+			);
+
+			$message = __(
+				'The payment provider returned a subscription that is no longer active. Please check your customer account for the current status.',
+				'dropkey-wp'
+			);
+
+			$notice_class = 'dropkey-checkout-return--cancelled';
+		} elseif ( $subscription ) {
+			$title = __(
+				'Checkout received',
+				'dropkey-wp'
+			);
+
+			$message = __(
+				'Your payment approval was received. DropKey WP is waiting for the payment provider confirmation before activating your subscription and license.',
+				'dropkey-wp'
+			);
+
+			$notice_class = 'dropkey-checkout-return--pending';
+		} else {
+			$title = __(
+				'Checkout received',
+				'dropkey-wp'
+			);
+
+			$message = __(
+				'Your payment approval was received. We are waiting for the payment provider confirmation to finish setting up your subscription.',
+				'dropkey-wp'
+			);
+
+			$notice_class = 'dropkey-checkout-return--pending';
+		}
+
+		ob_start();
+		?>
+		<div class="dropkey-product-checkout">
+
+			<div class="dropkey-checkout-return <?php echo esc_attr( $notice_class ); ?>">
+
+				<div class="dropkey-checkout-return-icon" aria-hidden="true">
+					<?php if ( 'dropkey-checkout-return--cancelled' === $notice_class ) : ?>
+						×
+					<?php else : ?>
+						✓
+					<?php endif; ?>
+				</div>
+
+				<div class="dropkey-checkout-return-content">
+
+					<p class="dropkey-checkout-return-eyebrow">
+						<?php echo esc_html( $product->get_name() ); ?>
+					</p>
+
+					<h2>
+						<?php echo esc_html( $title ); ?>
+					</h2>
+
+					<p>
+						<?php echo esc_html( $message ); ?>
+					</p>
+
+					<?php if ( '' !== $status ) : ?>
+
+						<div class="dropkey-checkout-return-status">
+							<span>
+								<?php
+								echo esc_html__(
+									'Subscription status',
+									'dropkey-wp'
+								);
+								?>
+							</span>
+
+							<strong>
+								<?php
+								echo esc_html(
+									$this->format_subscription_status(
+										$status
+									)
+								);
+								?>
+							</strong>
+						</div>
+
+					<?php endif; ?>
+
+					<?php if ( '' !== $state['subscription_id'] ) : ?>
+
+						<div class="dropkey-checkout-return-reference">
+
+							<span>
+								<?php
+								echo esc_html__(
+									'Subscription reference',
+									'dropkey-wp'
+								);
+								?>
+							</span>
+
+							<code>
+								<?php echo esc_html( $state['subscription_id'] ); ?>
+							</code>
+
+						</div>
+
+					<?php endif; ?>
+
+					<div class="dropkey-checkout-return-actions">
+
+						<?php if ( $account_url ) : ?>
+
+							<a
+								class="dropkey-checkout-account-link"
+								href="<?php echo esc_url( $account_url ); ?>"
+							>
+								<?php
+								echo esc_html__(
+									'View My Account',
+									'dropkey-wp'
+								);
+								?>
+							</a>
+
+						<?php endif; ?>
+
+						<a
+							class="dropkey-checkout-product-link"
+							href="<?php echo esc_url( $this->get_clean_product_url() ); ?>"
+						>
+							<?php
+							echo esc_html__(
+								'Return to product',
+								'dropkey-wp'
+							);
+							?>
+						</a>
+
+					</div>
+
+				</div>
+
+			</div>
+
+		</div>
+
+		<script>
+			(function () {
+				try {
+					const url = new URL(window.location.href);
+
+					[
+						'subscription_id',
+						'ba_token',
+						'token',
+						'PayerID',
+						'cancel'
+					].forEach(function (parameter) {
+						url.searchParams.delete(parameter);
+					});
+
+					const cleanUrl =
+						url.pathname +
+						(url.searchParams.toString()
+							? '?' + url.searchParams.toString()
+							: '') +
+						url.hash;
+
+					window.history.replaceState(
+						{},
+						document.title,
+						cleanUrl
+					);
+				} catch (error) {
+					/*
+					 * URL cleanup is cosmetic only. Never prevent the
+					 * checkout result from being displayed if the browser
+					 * does not support URL manipulation.
+					 */
+				}
+			})();
+		</script>
+
+		<style>
+			.dropkey-checkout-return {
+				display: flex;
+				gap: 20px;
+				align-items: flex-start;
+				padding: 28px;
+				margin: 24px 0;
+				border: 1px solid #ddd;
+				border-radius: 12px;
+				background: #fff;
+			}
+
+			.dropkey-checkout-return-icon {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				flex: 0 0 44px;
+				width: 44px;
+				height: 44px;
+				border-radius: 50%;
+				font-size: 28px;
+				line-height: 1;
+				font-weight: 600;
+			}
+
+			.dropkey-checkout-return--success
+				.dropkey-checkout-return-icon {
+				background: #e7f6ec;
+				color: #217a3b;
+			}
+
+			.dropkey-checkout-return--pending
+				.dropkey-checkout-return-icon {
+				background: #f1ecff;
+				color: #6b46c1;
+			}
+
+			.dropkey-checkout-return--cancelled
+				.dropkey-checkout-return-icon {
+				background: #fbeaea;
+				color: #b42318;
+			}
+
+			.dropkey-checkout-return-content {
+				flex: 1;
+				min-width: 0;
+			}
+
+			.dropkey-checkout-return-eyebrow {
+				margin: 0 0 6px;
+				font-size: 12px;
+				font-weight: 600;
+				letter-spacing: .08em;
+				text-transform: uppercase;
+				opacity: .65;
+			}
+
+			.dropkey-checkout-return h2 {
+				margin: 0 0 10px;
+			}
+
+			.dropkey-checkout-return-content > p:not(
+				.dropkey-checkout-return-eyebrow
+			) {
+				margin: 0 0 18px;
+			}
+
+			.dropkey-checkout-return-status,
+			.dropkey-checkout-return-reference {
+				display: flex;
+				gap: 10px;
+				align-items: center;
+				flex-wrap: wrap;
+				margin-top: 10px;
+				padding: 12px 14px;
+				border-radius: 8px;
+				background: #f7f7f7;
+			}
+
+			.dropkey-checkout-return-status span,
+			.dropkey-checkout-return-reference span {
+				font-size: 13px;
+				opacity: .7;
+			}
+
+			.dropkey-checkout-return-reference code {
+				overflow-wrap: anywhere;
+			}
+
+			.dropkey-checkout-return-actions {
+				display: flex;
+				gap: 12px;
+				flex-wrap: wrap;
+				margin-top: 22px;
+			}
+
+			.dropkey-checkout-account-link,
+			.dropkey-checkout-product-link {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 42px;
+				padding: 0 18px;
+				border-radius: 8px;
+				text-decoration: none;
+			}
+
+			.dropkey-checkout-account-link {
+				background: #111;
+				color: #fff;
+			}
+
+			.dropkey-checkout-account-link:hover,
+			.dropkey-checkout-account-link:focus {
+				color: #fff;
+				opacity: .9;
+			}
+
+			.dropkey-checkout-product-link {
+				border: 1px solid #ddd;
+				background: #fff;
+				color: inherit;
+			}
+
+			@media (max-width: 600px) {
+				.dropkey-checkout-return {
+					flex-direction: column;
+					padding: 22px;
+				}
+
+				.dropkey-checkout-return-actions {
+					flex-direction: column;
+				}
+
+				.dropkey-checkout-account-link,
+				.dropkey-checkout-product-link {
+					width: 100%;
+				}
+			}
+		</style>
+
+		<?php
+
+		return ob_get_clean();
+	}
+
+	/**
+	 * Get the customer account URL.
+	 *
+	 * Looks for a page containing the DropKey account shortcode first.
+	 *
+	 * @return string
+	 */
+	private function get_account_url() {
+		$page = get_pages(
+			array(
+				'number'      => 1,
+				'post_status' => 'publish',
+				's',
+			)
+		);
+
+		/*
+		 * Avoid relying on page search alone. The account page may not
+		 * have a predictable title or slug, so inspect published pages
+		 * for the shortcode.
+		 */
+		$pages = get_pages(
+			array(
+				'post_status' => 'publish',
+				'number'      => -1,
+			)
+		);
+
+		foreach ( $pages as $page ) {
+			if (
+				has_shortcode(
+					(string) $page->post_content,
+					'dropkey_account'
+				)
+			) {
+				return get_permalink( $page->ID );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Get the current product URL without checkout return parameters.
+	 *
+	 * @return string
+	 */
+	private function get_clean_product_url() {
+		$url = get_permalink();
+
+		if ( ! $url ) {
+			$url = home_url( '/' );
+		}
+
+		return esc_url_raw( $url );
+	}
+
+	/**
+	 * Format a subscription status for display.
+	 *
+	 * @param string $status Subscription status.
+	 * @return string
+	 */
+	private function format_subscription_status( $status ) {
+		$labels = array(
+			'pending'   => __( 'Pending', 'dropkey-wp' ),
+			'active'    => __( 'Active', 'dropkey-wp' ),
+			'past_due'  => __( 'Past due', 'dropkey-wp' ),
+			'suspended' => __( 'Suspended', 'dropkey-wp' ),
+			'cancelled' => __( 'Cancelled', 'dropkey-wp' ),
+			'expired'   => __( 'Expired', 'dropkey-wp' ),
+		);
+
+		return isset( $labels[ $status ] )
+			? $labels[ $status ]
+			: ucfirst( str_replace( '_', ' ', $status ) );
 	}
 
 	/**
