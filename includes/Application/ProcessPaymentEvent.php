@@ -230,31 +230,26 @@ final class ProcessPaymentEvent {
 			}
 		}
 
-		/*
-		 * Keep the original ID because the record may be reloaded below.
-		 * If the reload fails, this ID is still required to release the
-		 * processing lock owned by this request.
-		 */
 		$event_id_number = $record->get_id();
 
-		$processing = $this->events->claim_for_processing(
+		$processing_claimed_at = $this->events->claim_for_processing(
 			$event_id_number
 		);
 
-		if ( is_wp_error( $processing ) ) {
+		if ( is_wp_error( $processing_claimed_at ) ) {
 			if (
 				'dropkey_gateway_event_already_processing' ===
-				$processing->get_error_code()
+				$processing_claimed_at->get_error_code()
 			) {
 				/*
-				 * Another request currently owns the processing lock.
+				 * Another request currently owns the processing lease.
 				 * The event is already durably recorded, so acknowledge
 				 * the webhook without attempting duplicate processing.
 				 */
 				return $record;
 			}
 
-			return $processing;
+			return $processing_claimed_at;
 		}
 
 		/*
@@ -267,10 +262,11 @@ final class ProcessPaymentEvent {
 		);
 
 		if ( ! $record ) {
-			$this->events->release_processing_lock(
-				$event_id_number
-			);
-
+			/*
+			 * The event remains in PROCESSING and can be reclaimed after
+			 * the processing lease expires. Do not attempt an unconditional
+			 * status update because the row ownership cannot be verified.
+			 */
 			return new \WP_Error(
 				'dropkey_gateway_event_reload_failed',
 				__(
@@ -279,6 +275,13 @@ final class ProcessPaymentEvent {
 				)
 			);
 		}
+
+		/*
+		 * The database timestamp written by claim_for_processing() is the
+		 * durable ownership token. Use the value returned by the claim
+		 * rather than generating a new timestamp.
+		 */
+		$processing_claimed_at = (string) $processing_claimed_at;
 
 		$decoded = json_decode(
 			$record->get_payload(),
@@ -296,7 +299,8 @@ final class ProcessPaymentEvent {
 
 			$this->fail_event(
 				$record,
-				$error
+				$error,
+				$processing_claimed_at
 			);
 
 			return $error;
@@ -311,14 +315,16 @@ final class ProcessPaymentEvent {
 		if ( is_wp_error( $result ) ) {
 			$this->fail_event(
 				$record,
-				$result
+				$result,
+				$processing_claimed_at
 			);
 
 			return $result;
 		}
 
 		$processed = $this->events->mark_processed(
-			$record->get_id()
+			$record->get_id(),
+			$processing_claimed_at
 		);
 
 		if ( is_wp_error( $processed ) ) {
@@ -340,25 +346,23 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Mark an event as failed, release its processing lock,
-	 * and notify integrations.
+	 * Mark an event as failed and notify integrations.
 	 *
-	 * @param GatewayEvent $record Event.
-	 * @param \WP_Error    $error  Error.
+	 * @param GatewayEvent $record                Event.
+	 * @param \WP_Error    $error                 Error.
+	 * @param string       $processing_claimed_at Processing ownership token.
 	 * @return void
 	 */
 	private function fail_event(
 		GatewayEvent $record,
-		\WP_Error $error
+		\WP_Error $error,
+		$processing_claimed_at
 	) {
 		$updated = $this->events->update_status(
 			$record->get_id(),
 			GatewayEvent::STATUS_FAILED,
-			$error->get_error_message()
-		);
-
-		$released = $this->events->release_processing_lock(
-			$record->get_id()
+			$error->get_error_message(),
+			$processing_claimed_at
 		);
 
 		if ( is_wp_error( $updated ) ) {
@@ -367,16 +371,6 @@ final class ProcessPaymentEvent {
 					'DropKey WP: Failed to mark gateway event #%d as failed: %s',
 					absint( $record->get_id() ),
 					$updated->get_error_message()
-				)
-			);
-		}
-
-		if ( is_wp_error( $released ) ) {
-			error_log(
-				sprintf(
-					'DropKey WP: Failed to release processing lock for gateway event #%d: %s',
-					absint( $record->get_id() ),
-					$released->get_error_message()
 				)
 			);
 		}

@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class GatewayEventRepository {
 
-	private const LOCK_TIMEOUT_SECONDS = 0;
+	private const PROCESSING_TIMEOUT_SECONDS = 300;
 
 	private $wpdb;
 
@@ -123,12 +123,14 @@ final class GatewayEventRepository {
 	/**
 	 * Atomically claim an event for processing.
 	 *
-	 * A MySQL named lock is held by the current database session for the
-	 * entire processing operation. If the PHP request terminates, MySQL
-	 * automatically releases the lock and another request can retry.
+	 * The updated_at value written during the claim becomes the processing
+	 * ownership token. A processing request may finalize the event only when
+	 * that token still matches the row.
+	 *
+	 * A processing event can be reclaimed after its lease becomes stale.
 	 *
 	 * @param int $id Event ID.
-	 * @return true|\WP_Error
+	 * @return string|\WP_Error Processing ownership token.
 	 */
 	public function claim_for_processing( $id ) {
 		$id = absint( $id );
@@ -143,38 +145,7 @@ final class GatewayEventRepository {
 			);
 		}
 
-		$lock_name = $this->get_processing_lock_name( $id );
-
-		$lock_result = $this->wpdb->get_var(
-			$this->wpdb->prepare(
-				'SELECT GET_LOCK(%s, %d)',
-				$lock_name,
-				self::LOCK_TIMEOUT_SECONDS
-			)
-		);
-
-		if ( null === $lock_result ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_lock_failed',
-				__(
-					'The gateway event processing lock could not be acquired.',
-					'dropkey-wp'
-				),
-				array(
-					'db_error' => $this->wpdb->last_error,
-				)
-			);
-		}
-
-		if ( 1 !== (int) $lock_result ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_already_processing',
-				__(
-					'The gateway event is already being processed or is no longer available for processing.',
-					'dropkey-wp'
-				)
-			);
-		}
+		$claimed_at = current_time( 'mysql', true );
 
 		$updated = $this->wpdb->query(
 			$this->wpdb->prepare(
@@ -184,18 +155,23 @@ final class GatewayEventRepository {
 					error_message = NULL,
 					updated_at = %s
 				WHERE id = %d
-				AND status IN (%s, %s)",
+				AND (
+					status = %s
+					OR (
+						status = %s
+						AND updated_at <= UTC_TIMESTAMP() - INTERVAL %d SECOND
+					)
+				)",
 				GatewayEvent::STATUS_PROCESSING,
-				current_time( 'mysql', true ),
+				$claimed_at,
 				$id,
 				GatewayEvent::STATUS_RECEIVED,
-				GatewayEvent::STATUS_PROCESSING
+				GatewayEvent::STATUS_PROCESSING,
+				self::PROCESSING_TIMEOUT_SECONDS
 			)
 		);
 
 		if ( false === $updated ) {
-			$this->release_processing_lock( $id );
-
 			return new \WP_Error(
 				'dropkey_gateway_event_claim_failed',
 				__(
@@ -209,8 +185,6 @@ final class GatewayEventRepository {
 		}
 
 		if ( 1 !== (int) $updated ) {
-			$this->release_processing_lock( $id );
-
 			return new \WP_Error(
 				'dropkey_gateway_event_already_processing',
 				__(
@@ -220,21 +194,29 @@ final class GatewayEventRepository {
 			);
 		}
 
-		return true;
+		return $claimed_at;
 	}
 
 	/**
 	 * Update event status.
 	 *
-	 * This method does not automatically release the processing lock because
-	 * status updates may also be used outside the processing workflow.
+	 * When a processing ownership token is supplied, the update is performed
+	 * only if this request still owns the processing lease.
 	 *
-	 * @param int         $id            Event ID.
-	 * @param string      $status        Event status.
-	 * @param string|null $error_message Error message.
+	 * @param int         $id                    Event ID.
+	 * @param string      $status                Event status.
+	 * @param string|null $error_message         Error message.
+	 * @param string|null $processing_claimed_at Processing ownership token.
 	 * @return true|\WP_Error
 	 */
-	public function update_status( $id, $status, $error_message = null ) {
+	public function update_status(
+		$id,
+		$status,
+		$error_message = null,
+		$processing_claimed_at = null
+	) {
+		$id = absint( $id );
+
 		$data = array(
 			'status'     => $status,
 			'updated_at' => current_time( 'mysql', true ),
@@ -250,11 +232,65 @@ final class GatewayEventRepository {
 			$formats[]             = '%s';
 		}
 
+		if ( null !== $processing_claimed_at ) {
+			$sql = "UPDATE {$this->table}
+				SET status = %s,
+					updated_at = %s";
+
+			$params = array(
+				$status,
+				$data['updated_at'],
+			);
+
+			if ( null !== $error_message ) {
+				$sql      .= ', error_message = %s';
+				$params[] = $error_message;
+			}
+
+			$sql .= "
+				WHERE id = %d
+				AND status = %s
+				AND updated_at = %s";
+
+			$params[] = $id;
+			$params[] = GatewayEvent::STATUS_PROCESSING;
+			$params[] = $processing_claimed_at;
+
+			$updated = $this->wpdb->query(
+				$this->wpdb->prepare(
+					$sql,
+					$params
+				)
+			);
+
+			if ( false === $updated ) {
+				return new \WP_Error(
+					'dropkey_gateway_event_update_failed',
+					__( 'The gateway event could not be updated.', 'dropkey-wp' ),
+					array(
+						'db_error' => $this->wpdb->last_error,
+					)
+				);
+			}
+
+			if ( 1 !== (int) $updated ) {
+				return new \WP_Error(
+					'dropkey_gateway_event_processing_ownership_lost',
+					__(
+						'The gateway event processing ownership is no longer held by this request.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			return true;
+		}
+
 		$updated = $this->wpdb->update(
 			$this->table,
 			$data,
 			array(
-				'id' => absint( $id ),
+				'id' => $id,
 			),
 			$formats,
 			array(
@@ -265,10 +301,7 @@ final class GatewayEventRepository {
 		if ( false === $updated ) {
 			return new \WP_Error(
 				'dropkey_gateway_event_update_failed',
-				__(
-					'The gateway event could not be updated.',
-					'dropkey-wp'
-				),
+				__( 'The gateway event could not be updated.', 'dropkey-wp' ),
 				array(
 					'db_error' => $this->wpdb->last_error,
 				)
@@ -326,14 +359,64 @@ final class GatewayEventRepository {
 	}
 
 	/**
-	 * Mark an event as processed and release its processing lock.
+	 * Mark an event as processed.
 	 *
-	 * @param int $id Event ID.
+	 * When a processing ownership token is supplied, the event is marked
+	 * processed only if this request still owns the processing lease.
+	 *
+	 * @param int         $id                    Event ID.
+	 * @param string|null $processing_claimed_at Processing ownership token.
 	 * @return true|\WP_Error
 	 */
-	public function mark_processed( $id ) {
+	public function mark_processed( $id, $processing_claimed_at = null ) {
 		$id         = absint( $id );
 		$updated_at = current_time( 'mysql', true );
+
+		if ( null !== $processing_claimed_at ) {
+			$updated = $this->wpdb->query(
+				$this->wpdb->prepare(
+					"UPDATE {$this->table}
+					SET status = %s,
+						processed_at = %s,
+						updated_at = %s,
+						error_message = NULL
+					WHERE id = %d
+					AND status = %s
+					AND updated_at = %s",
+					GatewayEvent::STATUS_PROCESSED,
+					$updated_at,
+					$updated_at,
+					$id,
+					GatewayEvent::STATUS_PROCESSING,
+					$processing_claimed_at
+				)
+			);
+
+			if ( false === $updated ) {
+				return new \WP_Error(
+					'dropkey_gateway_event_processed_failed',
+					__(
+						'The gateway event could not be marked as processed.',
+						'dropkey-wp'
+					),
+					array(
+						'db_error' => $this->wpdb->last_error,
+					)
+				);
+			}
+
+			if ( 1 !== (int) $updated ) {
+				return new \WP_Error(
+					'dropkey_gateway_event_processing_ownership_lost',
+					__(
+						'The gateway event processing ownership is no longer held by this request.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			return true;
+		}
 
 		$updated = $this->wpdb->update(
 			$this->table,
@@ -357,8 +440,6 @@ final class GatewayEventRepository {
 			)
 		);
 
-		$release_result = $this->release_processing_lock( $id );
-
 		if ( false === $updated ) {
 			return new \WP_Error(
 				'dropkey_gateway_event_processed_failed',
@@ -372,96 +453,6 @@ final class GatewayEventRepository {
 			);
 		}
 
-		if ( is_wp_error( $release_result ) ) {
-			return $release_result;
-		}
-
 		return true;
-	}
-
-	/**
-	 * Release the processing lock for an event.
-	 *
-	 * @param int $id Event ID.
-	 * @return true|\WP_Error
-	 */
-	public function release_processing_lock( $id ) {
-		$id = absint( $id );
-
-		if ( $id <= 0 ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_lock_release_invalid',
-				__(
-					'A valid gateway event ID is required.',
-					'dropkey-wp'
-				)
-			);
-		}
-
-		$lock_name = $this->get_processing_lock_name( $id );
-
-		$result = $this->wpdb->get_var(
-			$this->wpdb->prepare(
-				'SELECT RELEASE_LOCK(%s)',
-				$lock_name
-			)
-		);
-
-		if ( null === $result ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_lock_release_failed',
-				__(
-					'The gateway event processing lock could not be released.',
-					'dropkey-wp'
-				),
-				array(
-					'db_error' => $this->wpdb->last_error,
-				)
-			);
-		}
-
-		/*
-		 * RELEASE_LOCK() returns 1 when this session released the lock,
-		 * 0 when another session owns it, and NULL when the lock does not
-		 * exist. A missing lock is safe because the processing session has
-		 * already lost ownership.
-		 */
-		if ( 0 === (int) $result ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_lock_not_owned',
-				__(
-					'The gateway event processing lock is no longer owned by this request.',
-					'dropkey-wp'
-				)
-			);
-		}
-
-		return true;
-	}
-
-	/**
-	 * Build the MySQL named lock used for one gateway event.
-	 *
-	 * @param int $id Event ID.
-	 * @return string
-	 */
-	private function get_processing_lock_name( $id ) {
-		$database_name = '';
-
-		if ( isset( $this->wpdb->dbname ) ) {
-			$database_name = (string) $this->wpdb->dbname;
-		}
-
-		if ( '' === $database_name && defined( 'DB_NAME' ) ) {
-			$database_name = (string) DB_NAME;
-		}
-
-		$database_hash = substr(
-			hash( 'sha256', $database_name ),
-			0,
-			12
-		);
-
-		return 'dropkey_wp_' . $database_hash . '_gateway_event_' . absint( $id );
 	}
 }
