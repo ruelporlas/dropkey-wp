@@ -672,4 +672,4 @@ final class ProcessPaymentEvent {
 			? $map[ $event_type ]
 			: '';
 	}
-}
+} 
