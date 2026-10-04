@@ -11,6 +11,7 @@ use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
+use DropKeyWP\Database\Repositories\SubscriptionEventRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Domain\Subscription;
 
@@ -54,6 +55,13 @@ final class SubscriptionAdmin {
 	private $change_status;
 
 	/**
+	 * Subscription event repository.
+	 *
+	 * @var SubscriptionEventRepository
+	 */
+	private $subscription_events;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param SubscriptionRepository $subscriptions Subscription repository.
@@ -74,6 +82,12 @@ final class SubscriptionAdmin {
 
 		$this->change_status = new ChangeSubscriptionStatus(
 			$subscriptions
+		);
+
+		global $wpdb;
+
+		$this->subscription_events = new SubscriptionEventRepository(
+			$wpdb
 		);
 	}
 
@@ -1010,6 +1024,20 @@ final class SubscriptionAdmin {
 
 						<div class="postbox-header">
 							<h2>
+								<?php echo esc_html__( 'Activity', 'dropkey-wp' ); ?>
+							</h2>
+						</div>
+
+						<div class="inside">
+							<?php $this->render_subscription_events( $subscription->get_id() ); ?>
+						</div>
+
+					</div>
+
+					<div class="postbox">
+
+						<div class="postbox-header">
+							<h2>
 								<?php echo esc_html__( 'IDs', 'dropkey-wp' ); ?>
 							</h2>
 						</div>
@@ -1067,6 +1095,100 @@ final class SubscriptionAdmin {
 
 			<?php $this->render_admin_styles(); ?>
 
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render subscription lifecycle events.
+	 *
+	 * @param int $subscription_id Subscription ID.
+	 * @return void
+	 */
+	private function render_subscription_events( $subscription_id ) {
+		$events = $this->subscription_events->all_by_subscription(
+			$subscription_id
+		);
+
+		if ( empty( $events ) ) {
+			?>
+			<p class="description">
+				<?php echo esc_html__( 'No activity has been recorded for this subscription.', 'dropkey-wp' ); ?>
+			</p>
+			<?php
+			return;
+		}
+
+		?>
+		<div class="dropkey-wp-subscription-events">
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th scope="col">
+							<?php echo esc_html__( 'Date', 'dropkey-wp' ); ?>
+						</th>
+						<th scope="col">
+							<?php echo esc_html__( 'Change', 'dropkey-wp' ); ?>
+						</th>
+						<th scope="col">
+							<?php echo esc_html__( 'Performed By', 'dropkey-wp' ); ?>
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+
+					<?php foreach ( $events as $event ) : ?>
+
+						<?php
+						$actor_name = __( 'System', 'dropkey-wp' );
+
+						if ( ! empty( $event->actor_user_id ) ) {
+							$actor = get_userdata(
+								(int) $event->actor_user_id
+							);
+
+							if ( $actor ) {
+								$actor_name = $actor->display_name;
+
+								if ( '' === trim( $actor_name ) ) {
+									$actor_name = $actor->user_login;
+								}
+							}
+						}
+						?>
+
+						<tr>
+
+							<td>
+								<?php echo esc_html( $this->format_datetime( $event->created_at ) ); ?>
+							</td>
+
+							<td>
+								<strong>
+									<?php echo esc_html( $this->get_status_label( $event->previous_status ) ); ?>
+								</strong>
+
+								<span
+									class="dropkey-wp-event-arrow"
+									aria-hidden="true"
+								>→</span>
+
+								<strong>
+									<?php echo esc_html( $this->get_status_label( $event->new_status ) ); ?>
+								</strong>
+							</td>
+
+							<td>
+								<?php echo esc_html( $actor_name ); ?>
+							</td>
+
+						</tr>
+
+					<?php endforeach; ?>
+
+				</tbody>
+			</table>
 		</div>
 		<?php
 	}
@@ -1930,6 +2052,35 @@ final class SubscriptionAdmin {
 				color: #50575e;
 				overflow-wrap: anywhere;
 				word-break: break-word;
+			}
+
+			.dropkey-wp-subscription-events {
+				overflow-x: auto;
+			}
+
+			.dropkey-wp-subscription-events table {
+				width: 100%;
+				border: 0;
+				box-shadow: none;
+			}
+
+			.dropkey-wp-subscription-events th,
+			.dropkey-wp-subscription-events td {
+				vertical-align: middle;
+			}
+
+			.dropkey-wp-subscription-events th {
+				white-space: nowrap;
+			}
+
+			.dropkey-wp-subscription-events td {
+				padding: 9px 12px;
+			}
+
+			.dropkey-wp-event-arrow {
+				display: inline-block;
+				margin: 0 6px;
+				color: #646970;
 			}
 
 			@media screen and (max-width: 1100px) {
