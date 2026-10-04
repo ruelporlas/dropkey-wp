@@ -41,6 +41,9 @@ final class CreateLicense {
 	/**
 	 * Create a license for an active subscription.
 	 *
+	 * This operation is idempotent. If the subscription already has
+	 * a license, the existing license is returned.
+	 *
 	 * @param int $subscription_id Subscription ID.
 	 * @return License|\WP_Error
 	 */
@@ -66,15 +69,19 @@ final class CreateLicense {
 		if ( Subscription::STATUS_ACTIVE !== $subscription->get_status() ) {
 			return new \WP_Error(
 				'dropkey_license_subscription_not_active',
-				__( 'A license can only be created for an active subscription.', 'dropkey-wp' )
+				__(
+					'A license can only be created for an active subscription.',
+					'dropkey-wp'
+				)
 			);
 		}
 
-		if ( $this->licenses->find_by_subscription_id( $subscription_id ) ) {
-			return new \WP_Error(
-				'dropkey_license_already_exists',
-				__( 'A license already exists for this subscription.', 'dropkey-wp' )
-			);
+		$existing_license = $this->licenses->find_by_subscription_id(
+			$subscription_id
+		);
+
+		if ( $existing_license ) {
+			return $existing_license;
 		}
 
 		$product = $this->products->find( $subscription->get_product_id() );
@@ -107,7 +114,10 @@ final class CreateLicense {
 		} catch ( \Exception $exception ) {
 			return new \WP_Error(
 				'dropkey_license_key_generation_failed',
-				__( 'A secure license key could not be generated.', 'dropkey-wp' )
+				__(
+					'A secure license key could not be generated.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -146,7 +156,10 @@ final class CreateLicense {
 		if ( $this->licenses->find_by_key( $license->get_license_key() ) ) {
 			return new \WP_Error(
 				'dropkey_license_key_exists',
-				__( 'The generated license key already exists. Please try again.', 'dropkey-wp' )
+				__(
+					'The generated license key already exists. Please try again.',
+					'dropkey-wp'
+				)
 			);
 		}
 
