@@ -29,6 +29,9 @@ final class SynchronizeSubscriptionEntitlement {
 	/**
 	 * Synchronize the license associated with a subscription.
 	 *
+	 * A revoked license is an administrative terminal state and must
+	 * never be automatically restored by subscription activity.
+	 *
 	 * @param Subscription $subscription Subscription.
 	 * @return License|null|\WP_Error
 	 */
@@ -39,6 +42,15 @@ final class SynchronizeSubscriptionEntitlement {
 
 		if ( ! $license ) {
 			return null;
+		}
+
+		/*
+		 * Revocation is an explicit administrative decision. Payment
+		 * success, renewal, or subscription status changes must not
+		 * silently undo it.
+		 */
+		if ( License::STATUS_REVOKED === $license->get_status() ) {
+			return $license;
 		}
 
 		$license_status = $this->get_license_status(
