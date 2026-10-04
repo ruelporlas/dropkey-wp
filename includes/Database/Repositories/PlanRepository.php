@@ -174,4 +174,70 @@ final class PlanRepository {
 
 		return $this->find( (int) $this->wpdb->insert_id );
 	}
+
+	/**
+	 * Update a plan.
+	 *
+	 * @param int                  $id   Plan ID.
+	 * @param array<string,mixed> $data Plan data.
+	 * @return Plan|\WP_Error
+	 */
+	public function update( $id, array $data ) {
+		$updated_at = current_time( 'mysql', true );
+
+		$updated = $this->wpdb->update(
+			$this->table,
+			array(
+				'product_id'             => $data['product_id'],
+				'name'                   => $data['name'],
+				'slug'                   => $data['slug'],
+				'price'                  => $data['price'],
+				'currency'               => $data['currency'],
+				'billing_interval'       => $data['billing_interval'],
+				'billing_interval_count' => $data['billing_interval_count'],
+				'activation_limit'       => $data['activation_limit'],
+				'status'                 => $data['status'],
+				'updated_at'             => $updated_at,
+			),
+			array(
+				'id' => $id,
+			),
+			array(
+				'%d',
+				'%s',
+				'%s',
+				'%s',
+				'%s',
+				'%s',
+				'%d',
+				'%d',
+				'%s',
+				'%s',
+			),
+			array(
+				'%d',
+			)
+		);
+
+		if ( false === $updated ) {
+			return new \WP_Error(
+				'dropkey_plan_update_failed',
+				__( 'The plan could not be updated.', 'dropkey-wp' ),
+				array(
+					'db_error' => $this->wpdb->last_error,
+				)
+			);
+		}
+
+		$plan = $this->find( $id );
+
+		if ( ! $plan ) {
+			return new \WP_Error(
+				'dropkey_plan_not_found',
+				__( 'The plan could not be found after updating.', 'dropkey-wp' )
+			);
+		}
+
+		return $plan;
+	}
 }

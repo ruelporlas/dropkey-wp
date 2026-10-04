@@ -7,6 +7,7 @@
 
 namespace DropKeyWP;
 
+use DropKeyWP\Admin\PlanAdmin;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\TestConsole;
 use DropKeyWP\Application\CreateLicense;
@@ -126,12 +127,20 @@ final class Plugin {
 			global $wpdb;
 
 			$product_repository = new ProductRepository( $wpdb );
+			$plan_repository    = new PlanRepository( $wpdb );
 
 			$product_admin = new ProductAdmin(
 				$product_repository
 			);
 
 			$product_admin->register();
+
+			$plan_admin = new PlanAdmin(
+				$plan_repository,
+				$product_repository
+			);
+
+			$plan_admin->register();
 		}
 
 		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -251,6 +260,11 @@ final class Plugin {
 		$service->execute();
 	}
 
+	/**
+	 * Register plugin settings page.
+	 *
+	 * @return void
+	 */
 	public function register_settings_page() {
 		add_options_page(
 			__( 'DropKey WP', 'dropkey-wp' ),
@@ -261,6 +275,11 @@ final class Plugin {
 		);
 	}
 
+	/**
+	 * Render plugin settings page.
+	 *
+	 * @return void
+	 */
 	public function render_settings_page() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -307,279 +326,303 @@ final class Plugin {
 		$settings = PayPalSettings::get();
 
 		?>
+		<div class="wrap">
+			<h1><?php echo esc_html__( 'DropKey WP', 'dropkey-wp' ); ?></h1>
 
+			<?php if ( '' !== $message ) : ?>
+				<div class="notice notice-success is-dismissible">
+					<p><?php echo esc_html( $message ); ?></p>
+				</div>
+			<?php endif; ?>
 
-	<div class="wrap">
-		<h1><?php echo esc_html__( 'DropKey WP', 'dropkey-wp' ); ?></h1>
+			<?php if ( '' !== $error ) : ?>
+				<div class="notice notice-error is-dismissible">
+					<p><?php echo esc_html( $error ); ?></p>
+				</div>
+			<?php endif; ?>
 
-		<?php if ( '' !== $message ) : ?>
-			<div class="notice notice-success is-dismissible">
-				<p><?php echo esc_html( $message ); ?></p>
-			</div>
-		<?php endif; ?>
+			<h2><?php echo esc_html__( 'PayPal', 'dropkey-wp' ); ?></h2>
 
-		<?php if ( '' !== $error ) : ?>
-			<div class="notice notice-error is-dismissible">
-				<p><?php echo esc_html( $error ); ?></p>
-			</div>
-		<?php endif; ?>
+			<form method="post">
+				<?php
+				wp_nonce_field(
+					'dropkey_wp_paypal_settings',
+					'dropkey_wp_paypal_nonce'
+				);
+				?>
 
-		<h2><?php echo esc_html__( 'PayPal', 'dropkey-wp' ); ?></h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row">
+							<label for="dropkey_wp_paypal_environment">
+								<?php echo esc_html__( 'Environment', 'dropkey-wp' ); ?>
+							</label>
+						</th>
 
-		<form method="post">
-			<?php
-			wp_nonce_field(
-				'dropkey_wp_paypal_settings',
-				'dropkey_wp_paypal_nonce'
-			);
-			?>
+						<td>
+							<select
+								name="dropkey_wp_paypal_environment"
+								id="dropkey_wp_paypal_environment"
+							>
+								<option
+									value="<?php echo esc_attr( PayPalSettings::ENVIRONMENT_SANDBOX ); ?>"
+									<?php
+									selected(
+										$settings['environment'],
+										PayPalSettings::ENVIRONMENT_SANDBOX
+									);
+									?>
+								>
+									<?php echo esc_html__( 'Sandbox', 'dropkey-wp' ); ?>
+								</option>
 
-			<table class="form-table" role="presentation">
-				<tr>
-					<th scope="row">
-						<label for="dropkey_wp_paypal_environment">
-							<?php echo esc_html__( 'Environment', 'dropkey-wp' ); ?>
-						</label>
-					</th>
-					<td>
-						<select
-							name="dropkey_wp_paypal_environment"
-							id="dropkey_wp_paypal_environment"
-						>
-							<option
-								value="<?php echo esc_attr( PayPalSettings::ENVIRONMENT_SANDBOX ); ?>"
+								<option
+									value="<?php echo esc_attr( PayPalSettings::ENVIRONMENT_LIVE ); ?>"
+									<?php
+									selected(
+										$settings['environment'],
+										PayPalSettings::ENVIRONMENT_LIVE
+									);
+									?>
+								>
+									<?php echo esc_html__( 'Live', 'dropkey-wp' ); ?>
+								</option>
+							</select>
+						</td>
+					</tr>
+
+					<tr>
+						<th scope="row">
+							<label for="dropkey_wp_paypal_client_id">
+								<?php echo esc_html__( 'Client ID', 'dropkey-wp' ); ?>
+							</label>
+						</th>
+
+						<td>
+							<input
+								type="text"
+								name="dropkey_wp_paypal_client_id"
+								id="dropkey_wp_paypal_client_id"
+								class="regular-text"
+								value="<?php echo esc_attr( $settings['client_id'] ); ?>"
+								autocomplete="off"
+							/>
+						</td>
+					</tr>
+
+					<tr>
+						<th scope="row">
+							<label for="dropkey_wp_paypal_client_secret">
+								<?php echo esc_html__( 'Client Secret', 'dropkey-wp' ); ?>
+							</label>
+						</th>
+
+						<td>
+							<input
+								type="password"
+								name="dropkey_wp_paypal_client_secret"
+								id="dropkey_wp_paypal_client_secret"
+								class="regular-text"
+								value=""
+								autocomplete="new-password"
+							/>
+
+							<p class="description">
 								<?php
-								selected(
-									$settings['environment'],
-									PayPalSettings::ENVIRONMENT_SANDBOX
+								echo esc_html__(
+									'Leave blank to keep the existing client secret.',
+									'dropkey-wp'
 								);
 								?>
-							>
-								<?php echo esc_html__( 'Sandbox', 'dropkey-wp' ); ?>
-							</option>
+							</p>
+						</td>
+					</tr>
 
-							<option
-								value="<?php echo esc_attr( PayPalSettings::ENVIRONMENT_LIVE ); ?>"
+					<tr>
+						<th scope="row">
+							<label for="dropkey_wp_paypal_webhook_id">
+								<?php echo esc_html__( 'Webhook ID', 'dropkey-wp' ); ?>
+							</label>
+						</th>
+
+						<td>
+							<input
+								type="text"
+								name="dropkey_wp_paypal_webhook_id"
+								id="dropkey_wp_paypal_webhook_id"
+								class="regular-text"
+								value="<?php echo esc_attr( $settings['webhook_id'] ); ?>"
+								autocomplete="off"
+							/>
+
+							<p class="description">
 								<?php
-								selected(
-									$settings['environment'],
-									PayPalSettings::ENVIRONMENT_LIVE
+								echo esc_html__(
+									'The Webhook ID assigned by PayPal to this webhook URL. This is not the PayPal Client ID.',
+									'dropkey-wp'
 								);
 								?>
-							>
-								<?php echo esc_html__( 'Live', 'dropkey-wp' ); ?>
-							</option>
-						</select>
-					</td>
-				</tr>
+							</p>
+						</td>
+					</tr>
+				</table>
 
-				<tr>
-					<th scope="row">
-						<label for="dropkey_wp_paypal_client_id">
-							<?php echo esc_html__( 'Client ID', 'dropkey-wp' ); ?>
-						</label>
-					</th>
-					<td>
-						<input
-							type="text"
-							name="dropkey_wp_paypal_client_id"
-							id="dropkey_wp_paypal_client_id"
-							class="regular-text"
-							value="<?php echo esc_attr( $settings['client_id'] ); ?>"
-							autocomplete="off"
-						/>
-					</td>
-				</tr>
+				<p class="submit">
+					<button
+						type="submit"
+						name="dropkey_wp_save_paypal"
+						class="button button-primary"
+						value="1"
+					>
+						<?php echo esc_html__( 'Save PayPal Settings', 'dropkey-wp' ); ?>
+					</button>
 
-				<tr>
-					<th scope="row">
-						<label for="dropkey_wp_paypal_client_secret">
-							<?php echo esc_html__( 'Client Secret', 'dropkey-wp' ); ?>
-						</label>
-					</th>
-					<td>
-						<input
-							type="password"
-							name="dropkey_wp_paypal_client_secret"
-							id="dropkey_wp_paypal_client_secret"
-							class="regular-text"
-							value=""
-							autocomplete="new-password"
-						/>
+					<button
+						type="submit"
+						name="dropkey_wp_test_paypal"
+						class="button"
+						value="1"
+					>
+						<?php echo esc_html__( 'Test PayPal Connection', 'dropkey-wp' ); ?>
+					</button>
+				</p>
+			</form>
+		</div>
+		<?php
+	}
 
-						<p class="description">
-							<?php
-							echo esc_html__(
-								'Leave blank to keep the existing client secret.',
-								'dropkey-wp'
-							);
-							?>
-						</p>
-					</td>
-				</tr>
+	/**
+	 * Save PayPal settings.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private function save_paypal_settings() {
+		$environment = isset( $_POST['dropkey_wp_paypal_environment'] )
+			? sanitize_key(
+				wp_unslash( $_POST['dropkey_wp_paypal_environment'] )
+			)
+			: PayPalSettings::ENVIRONMENT_SANDBOX;
 
-				<tr>
-					<th scope="row">
-						<label for="dropkey_wp_paypal_webhook_id">
-							<?php echo esc_html__( 'Webhook ID', 'dropkey-wp' ); ?>
-						</label>
-					</th>
-					<td>
-						<input
-							type="text"
-							name="dropkey_wp_paypal_webhook_id"
-							id="dropkey_wp_paypal_webhook_id"
-							class="regular-text"
-							value="<?php echo esc_attr( $settings['webhook_id'] ); ?>"
-							autocomplete="off"
-						/>
+		$client_id = isset( $_POST['dropkey_wp_paypal_client_id'] )
+			? sanitize_text_field(
+				wp_unslash( $_POST['dropkey_wp_paypal_client_id'] )
+			)
+			: '';
 
-						<p class="description">
-							<?php
-							echo esc_html__(
-								'The Webhook ID assigned by PayPal to this webhook URL. This is not the PayPal Client ID.',
-								'dropkey-wp'
-							);
-							?>
-						</p>
-					</td>
-				</tr>
-			</table>
+		$client_secret = isset( $_POST['dropkey_wp_paypal_client_secret'] )
+			? trim(
+				wp_unslash( $_POST['dropkey_wp_paypal_client_secret'] )
+			)
+			: '';
 
-			<p class="submit">
-				<button
-					type="submit"
-					name="dropkey_wp_save_paypal"
-					class="button button-primary"
-					value="1"
-				>
-					<?php echo esc_html__( 'Save PayPal Settings', 'dropkey-wp' ); ?>
-				</button>
+		$webhook_id = isset( $_POST['dropkey_wp_paypal_webhook_id'] )
+			? sanitize_text_field(
+				wp_unslash( $_POST['dropkey_wp_paypal_webhook_id'] )
+			)
+			: '';
 
-				<button
-					type="submit"
-					name="dropkey_wp_test_paypal"
-					class="button"
-					value="1"
-				>
-					<?php echo esc_html__( 'Test PayPal Connection', 'dropkey-wp' ); ?>
-				</button>
-			</p>
-		</form>
-	</div>
-	<?php
-}
-
-private function save_paypal_settings() {
-	$environment = isset( $_POST['dropkey_wp_paypal_environment'] )
-		? sanitize_key(
-			wp_unslash( $_POST['dropkey_wp_paypal_environment'] )
-		)
-		: PayPalSettings::ENVIRONMENT_SANDBOX;
-
-	$client_id = isset( $_POST['dropkey_wp_paypal_client_id'] )
-		? sanitize_text_field(
-			wp_unslash( $_POST['dropkey_wp_paypal_client_id'] )
-		)
-		: '';
-
-	$client_secret = isset( $_POST['dropkey_wp_paypal_client_secret'] )
-		? trim(
-			wp_unslash( $_POST['dropkey_wp_paypal_client_secret'] )
-		)
-		: '';
-
-	$webhook_id = isset( $_POST['dropkey_wp_paypal_webhook_id'] )
-		? sanitize_text_field(
-			wp_unslash( $_POST['dropkey_wp_paypal_webhook_id'] )
-		)
-		: '';
-
-	return PayPalSettings::save(
-		array(
-			'environment'   => $environment,
-			'client_id'     => $client_id,
-			'client_secret' => $client_secret,
-			'webhook_id'    => $webhook_id,
-		)
-	);
-}
-
-private function test_paypal_connection() {
-	$gateway = $this->gateway_manager->get( 'paypal' );
-
-	if ( ! $gateway instanceof PayPalGateway ) {
-		return new \WP_Error(
-			'dropkey_paypal_gateway_unavailable',
-			__(
-				'The PayPal gateway is not available.',
-				'dropkey-wp'
+		return PayPalSettings::save(
+			array(
+				'environment'   => $environment,
+				'client_id'     => $client_id,
+				'client_secret' => $client_secret,
+				'webhook_id'    => $webhook_id,
 			)
 		);
 	}
 
-	return $gateway->test_connection();
-}
+	/**
+	 * Test PayPal connection.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private function test_paypal_connection() {
+		$gateway = $this->gateway_manager->get( 'paypal' );
 
-public function register_rest_routes() {
-	global $wpdb;
+		if ( ! $gateway instanceof PayPalGateway ) {
+			return new \WP_Error(
+				'dropkey_paypal_gateway_unavailable',
+				__(
+					'The PayPal gateway is not available.',
+					'dropkey-wp'
+				)
+			);
+		}
 
-	$licenses    = new LicenseRepository( $wpdb );
-	$activations = new ActivationRepository( $wpdb );
-
-	$license_controller = new LicenseController(
-		$licenses,
-		$activations
-	);
-
-	$license_controller->register_routes();
-
-	$customers = new CustomerRepository( $wpdb );
-	$products  = new ProductRepository( $wpdb );
-	$plans     = new PlanRepository( $wpdb );
-
-	$subscriptions = new SubscriptionRepository( $wpdb );
-
-	$checkout = new CreateSubscriptionCheckout(
-		$this->gateway_manager,
-		$customers,
-		$products,
-		$plans,
-		$subscriptions
-	);
-
-	$checkout_controller = new CheckoutController(
-		$checkout
-	);
-
-	$checkout_controller->register_routes();
-
-	$events = new GatewayEventRepository( $wpdb );
-
-	$payment_event_processor = new ProcessPaymentEvent(
-		$events,
-		$subscriptions,
-		$licenses
-	);
-
-	$webhook_controller = new WebhookController(
-		$this->gateway_manager,
-		$payment_event_processor
-	);
-
-	$webhook_controller->register_routes();
-}
-
-public function get_gateway_manager() {
-	return $this->gateway_manager;
-}
-
-private function maybe_upgrade_database() {
-	if ( Installer::get_version() < Schema::VERSION ) {
-		Installer::install();
+		return $gateway->test_connection();
 	}
-}
 
+	/**
+	 * Register REST routes.
+	 *
+	 * @return void
+	 */
+	public function register_rest_routes() {
+		global $wpdb;
 
+		$licenses    = new LicenseRepository( $wpdb );
+		$activations = new ActivationRepository( $wpdb );
 
+		$license_controller = new LicenseController(
+			$licenses,
+			$activations
+		);
+
+		$license_controller->register_routes();
+
+		$customers = new CustomerRepository( $wpdb );
+		$products  = new ProductRepository( $wpdb );
+		$plans     = new PlanRepository( $wpdb );
+
+		$subscriptions = new SubscriptionRepository( $wpdb );
+
+		$checkout = new CreateSubscriptionCheckout(
+			$this->gateway_manager,
+			$customers,
+			$products,
+			$plans,
+			$subscriptions
+		);
+
+		$checkout_controller = new CheckoutController(
+			$checkout
+		);
+
+		$checkout_controller->register_routes();
+
+		$events = new GatewayEventRepository( $wpdb );
+
+		$payment_event_processor = new ProcessPaymentEvent(
+			$events,
+			$subscriptions,
+			$licenses
+		);
+
+		$webhook_controller = new WebhookController(
+			$this->gateway_manager,
+			$payment_event_processor
+		);
+
+		$webhook_controller->register_routes();
+	}
+
+	/**
+	 * Get gateway manager.
+	 *
+	 * @return GatewayManager
+	 */
+	public function get_gateway_manager() {
+		return $this->gateway_manager;
+	}
+
+	/**
+	 * Upgrade database when required.
+	 *
+	 * @return void
+	 */
+	private function maybe_upgrade_database() {
+		if ( Installer::get_version() < Schema::VERSION ) {
+			Installer::install();
+		}
+	}
 }
