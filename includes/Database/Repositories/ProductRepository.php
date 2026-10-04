@@ -160,4 +160,62 @@ final class ProductRepository {
 
 		return $this->find( (int) $this->wpdb->insert_id );
 	}
+
+	/**
+	 * Update a product.
+	 *
+	 * @param int                  $id Product ID.
+	 * @param array<string,mixed> $data Product data.
+	 * @return Product|\WP_Error
+	 */
+	public function update( $id, array $data ) {
+		$updated_at = current_time( 'mysql', true );
+
+		$updated = $this->wpdb->update(
+			$this->table,
+			array(
+				'name'        => $data['name'],
+				'slug'        => $data['slug'],
+				'type'        => $data['type'],
+				'description' => $data['description'],
+				'status'      => $data['status'],
+				'updated_at'  => $updated_at,
+			),
+			array(
+				'id' => $id,
+			),
+			array(
+				'%s',
+				'%s',
+				'%s',
+				'%s',
+				'%s',
+				'%s',
+			),
+			array(
+				'%d',
+			)
+		);
+
+		if ( false === $updated ) {
+			return new \WP_Error(
+				'dropkey_product_update_failed',
+				__( 'The product could not be updated.', 'dropkey-wp' ),
+				array(
+					'db_error' => $this->wpdb->last_error,
+				)
+			);
+		}
+
+		$product = $this->find( $id );
+
+		if ( ! $product ) {
+			return new \WP_Error(
+				'dropkey_product_not_found',
+				__( 'The product could not be found after updating.', 'dropkey-wp' )
+			);
+		}
+
+		return $product;
+	}
 }
