@@ -37,25 +37,10 @@ defined( 'ABSPATH' ) || exit;
  */
 final class Plugin {
 
-	/**
-	 * Singleton instance.
-	 *
-	 * @var Plugin|null
-	 */
 	private static $instance = null;
 
-	/**
-	 * Whether the plugin has already booted.
-	 *
-	 * @var bool
-	 */
 	private $booted = false;
 
-	/**
-	 * Get the plugin instance.
-	 *
-	 * @return Plugin
-	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -64,11 +49,6 @@ final class Plugin {
 		return self::$instance;
 	}
 
-	/**
-	 * Boot the plugin.
-	 *
-	 * @return void
-	 */
 	public function boot() {
 		if ( $this->booted ) {
 			return;
@@ -87,14 +67,8 @@ final class Plugin {
 		$subscription_event_repository = new SubscriptionEventRepository( $wpdb );
 		$subscription_repository       = new SubscriptionRepository( $wpdb );
 
-		/*
-		 * Payment gateways register themselves through GatewayManager.
-		 */
 		$gateway_manager = new GatewayManager();
 
-		/*
-		 * License creation for activated subscriptions.
-		 */
 		$create_license = new CreateLicense(
 			$license_repository,
 			$subscription_repository,
@@ -102,19 +76,11 @@ final class Plugin {
 			$plan_repository
 		);
 
-		/*
-		 * Synchronize subscription lifecycle state with its license
-		 * entitlement.
-		 */
 		$synchronize_subscription_entitlement =
 			new SynchronizeSubscriptionEntitlement(
 				$license_repository
 			);
 
-		/*
-		 * An activated subscription must have a license before its
-		 * entitlement can be synchronized.
-		 */
 		add_action(
 			'dropkey_wp_subscription_activated',
 			array(
@@ -125,12 +91,6 @@ final class Plugin {
 			1
 		);
 
-		/*
-		 * Subscription lifecycle entitlement synchronization.
-		 *
-		 * Activation runs after license creation. The other lifecycle
-		 * states only need entitlement synchronization.
-		 */
 		add_action(
 			'dropkey_wp_subscription_activated',
 			array(
@@ -171,25 +131,17 @@ final class Plugin {
 			1
 		);
 
-		/*
-		 * Payment event processing.
-		 */
 		$process_payment_event = new ProcessPaymentEvent(
 			$gateway_event_repository,
 			$subscription_repository,
-			$license_repository
+			$license_repository,
+			$gateway_manager
 		);
 
-		/*
-		 * Past-due subscription enforcement.
-		 */
 		$enforce_past_due_subscriptions = new EnforcePastDueSubscriptions(
 			$subscription_repository
 		);
 
-		/*
-		 * Subscription checkout.
-		 */
 		$create_subscription_checkout = new CreateSubscriptionCheckout(
 			$gateway_manager,
 			$customer_repository,
@@ -198,17 +150,11 @@ final class Plugin {
 			$subscription_repository
 		);
 
-		/*
-		 * Subscription lifecycle changes.
-		 */
 		$change_subscription_status = new ChangeSubscriptionStatus(
 			$subscription_repository,
 			$subscription_event_repository
 		);
 
-		/*
-		 * REST controllers.
-		 */
 		$checkout_controller = new CheckoutController(
 			$create_subscription_checkout
 		);
@@ -223,9 +169,6 @@ final class Plugin {
 			$process_payment_event
 		);
 
-		/*
-		 * REST routes must be registered during rest_api_init.
-		 */
 		add_action(
 			'rest_api_init',
 			array( $checkout_controller, 'register_routes' )
@@ -241,26 +184,17 @@ final class Plugin {
 			array( $webhook_controller, 'register_routes' )
 		);
 
-		/*
-		 * Frontend checkout shortcode.
-		 */
 		$product_checkout = new ProductCheckout(
 			$gateway_manager
 		);
 
 		$product_checkout->register();
 
-		/*
-		 * Subscription enforcement hook.
-		 */
 		add_action(
 			'dropkey_wp_enforce_past_due_subscriptions',
 			array( $enforce_past_due_subscriptions, 'execute' )
 		);
 
-		/*
-		 * WordPress admin.
-		 */
 		if ( is_admin() ) {
 
 			$product_admin = new ProductAdmin(

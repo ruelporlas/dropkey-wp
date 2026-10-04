@@ -12,6 +12,8 @@ use DropKeyWP\Database\Repositories\LicenseRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Domain\GatewayEvent;
 use DropKeyWP\Domain\Subscription;
+use DropKeyWP\Gateways\Contracts\PaymentGatewayInterface;
+use DropKeyWP\Gateways\GatewayManager;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -23,6 +25,8 @@ final class ProcessPaymentEvent {
 
 	private $licenses;
 
+	private $gateways;
+
 	private $change_status;
 
 	private $synchronize_entitlement;
@@ -30,24 +34,31 @@ final class ProcessPaymentEvent {
 	public function __construct(
 		GatewayEventRepository $events,
 		SubscriptionRepository $subscriptions,
-		LicenseRepository $licenses
+		LicenseRepository $licenses,
+		GatewayManager $gateways = null
 	) {
-		$this->events                  = $events;
-		$this->subscriptions           = $subscriptions;
-		$this->licenses                = $licenses;
-		$this->change_status           = new ChangeSubscriptionStatus(
+		$this->events        = $events;
+		$this->subscriptions = $subscriptions;
+		$this->licenses      = $licenses;
+		$this->gateways      = $gateways
+			? $gateways
+			: new GatewayManager();
+
+		$this->change_status = new ChangeSubscriptionStatus(
 			$subscriptions
 		);
-		$this->synchronize_entitlement = new SynchronizeSubscriptionEntitlement(
-			$licenses
-		);
+
+		$this->synchronize_entitlement =
+			new SynchronizeSubscriptionEntitlement(
+				$licenses
+			);
 	}
 
 	/**
 	 * Process a normalized gateway event.
 	 *
 	 * @param array $event Normalized gateway event.
-	 * @return GatewayEvent|WP_Error
+	 * @return GatewayEvent|\WP_Error
 	 */
 	public function execute( array $event ) {
 		$gateway = isset( $event['gateway'] )
@@ -92,10 +103,6 @@ final class ProcessPaymentEvent {
 				return $record;
 			}
 
-			/*
-			 * A provider event ID must represent one immutable payload.
-			 * Do not process a different payload under an existing event ID.
-			 */
 			if ( $record->get_payload_hash() !== $payload_hash ) {
 				return new \WP_Error(
 					'dropkey_gateway_event_payload_mismatch',
@@ -106,9 +113,6 @@ final class ProcessPaymentEvent {
 				);
 			}
 
-			/*
-			 * A previously failed event may safely be processed again.
-			 */
 			if ( GatewayEvent::STATUS_FAILED === $record->get_status() ) {
 				$reset = $this->events->reset_for_retry(
 					$record->get_id()
@@ -146,11 +150,6 @@ final class ProcessPaymentEvent {
 			);
 
 			if ( is_wp_error( $record ) ) {
-				/*
-				 * Another request may have created the same event between
-				 * our lookup and insert. Reload it before treating this
-				 * as a genuine failure.
-				 */
 				$record = $this->events->find_by_gateway_event(
 					$gateway,
 					$event_id
@@ -166,11 +165,9 @@ final class ProcessPaymentEvent {
 					);
 				}
 
-				if ( GatewayEvent::STATUS_PROCESSED === $record->get_status() ) {
-					return $record;
-				}
-
-				if ( $record->get_payload_hash() !== $payload_hash ) {
+				if (
+					$record->get_payload_hash() !== $payload_hash
+				) {
 					return new \WP_Error(
 						'dropkey_gateway_event_payload_mismatch',
 						__(
@@ -180,7 +177,17 @@ final class ProcessPaymentEvent {
 					);
 				}
 
-				if ( GatewayEvent::STATUS_FAILED === $record->get_status() ) {
+				if (
+					GatewayEvent::STATUS_PROCESSED ===
+					$record->get_status()
+				) {
+					return $record;
+				}
+
+				if (
+					GatewayEvent::STATUS_FAILED ===
+					$record->get_status()
+				) {
 					$reset = $this->events->reset_for_retry(
 						$record->get_id()
 					);
@@ -207,10 +214,6 @@ final class ProcessPaymentEvent {
 			}
 		}
 
-		/*
-		 * Claim the event atomically. Only one concurrent request can
-		 * change received -> processing.
-		 */
 		$processing = $this->events->claim_for_processing(
 			$record->get_id()
 		);
@@ -220,19 +223,36 @@ final class ProcessPaymentEvent {
 				'dropkey_gateway_event_already_processing' ===
 				$processing->get_error_code()
 			) {
-				return new \WP_Error(
-					'dropkey_gateway_event_processing',
-					__(
-						'The gateway event is already being processed.',
-						'dropkey-wp'
-					)
-				);
+				/*
+				 * Another request owns this event. The webhook has already
+				 * been durably recorded, so acknowledge it with a successful
+				 * result rather than causing the provider to retry it.
+				 */
+				return $record;
 			}
 
 			return $processing;
 		}
 
-		$decoded = json_decode( $record->get_payload(), true );
+		$record = $this->events->find_by_gateway_event(
+			$gateway,
+			$event_id
+		);
+
+		if ( ! $record ) {
+			return new \WP_Error(
+				'dropkey_gateway_event_reload_failed',
+				__(
+					'The gateway event could not be reloaded after being claimed.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		$decoded = json_decode(
+			$record->get_payload(),
+			true
+		);
 
 		if ( ! is_array( $decoded ) ) {
 			$error = new \WP_Error(
@@ -243,17 +263,7 @@ final class ProcessPaymentEvent {
 				)
 			);
 
-			$this->events->update_status(
-				$record->get_id(),
-				GatewayEvent::STATUS_FAILED,
-				$error->get_error_message()
-			);
-
-			do_action(
-				'dropkey_wp_gateway_event_failed',
-				$record,
-				$error
-			);
+			$this->fail_event( $record, $error );
 
 			return $error;
 		}
@@ -265,14 +275,7 @@ final class ProcessPaymentEvent {
 		);
 
 		if ( is_wp_error( $result ) ) {
-			$this->events->update_status(
-				$record->get_id(),
-				GatewayEvent::STATUS_FAILED,
-				$result->get_error_message()
-			);
-
-			do_action(
-				'dropkey_wp_gateway_event_failed',
+			$this->fail_event(
 				$record,
 				$result
 			);
@@ -303,21 +306,43 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
+	 * Mark an event as failed and notify integrations.
+	 *
+	 * @param GatewayEvent $record Event.
+	 * @param \WP_Error    $error  Error.
+	 * @return void
+	 */
+	private function fail_event(
+		GatewayEvent $record,
+		\WP_Error $error
+	) {
+		$this->events->update_status(
+			$record->get_id(),
+			GatewayEvent::STATUS_FAILED,
+			$error->get_error_message()
+		);
+
+		do_action(
+			'dropkey_wp_gateway_event_failed',
+			$record,
+			$error
+		);
+	}
+
+	/**
 	 * Process a subscription-related event.
 	 *
 	 * @param string $gateway    Gateway ID.
 	 * @param string $event_type Gateway event type.
 	 * @param array  $payload    Decoded event payload.
-	 * @return true|WP_Error
+	 * @return true|\WP_Error
 	 */
 	private function process_subscription_event(
 		$gateway,
 		$event_type,
 		array $payload
 	) {
-		$status = $this->map_event_to_status( $event_type );
-
-		if ( '' === $status ) {
+		if ( '' === $this->map_event_to_status( $event_type ) ) {
 			return true;
 		}
 
@@ -355,15 +380,56 @@ final class ProcessPaymentEvent {
 			);
 		}
 
-		$period = $this->get_subscription_period(
-			$gateway,
-			$event_type,
-			$resource
+		/*
+		 * PayPal webhook delivery is at-least-once and events can arrive
+		 * out of order. The webhook payload tells us what happened, but
+		 * PayPal's current subscription resource tells us what is true now.
+		 */
+		$gateway_instance = $this->gateways->get(
+			$gateway
 		);
 
-		if ( is_wp_error( $period ) ) {
-			return $period;
+		if ( ! $gateway_instance instanceof PaymentGatewayInterface ) {
+			return new \WP_Error(
+				'dropkey_gateway_not_available',
+				__(
+					'The payment gateway required to reconcile this event is not available.',
+					'dropkey-wp'
+				)
+			);
 		}
+
+		$remote_subscription = $gateway_instance->get_subscription(
+			$gateway_subscription_id
+		);
+
+		if ( is_wp_error( $remote_subscription ) ) {
+			return $remote_subscription;
+		}
+
+		if ( ! is_array( $remote_subscription ) ) {
+			return new \WP_Error(
+				'dropkey_gateway_subscription_invalid_response',
+				__(
+					'The payment gateway returned an invalid subscription response.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		$status = $this->resolve_remote_status(
+			$event_type,
+			$payload,
+			$remote_subscription
+		);
+
+		if ( is_wp_error( $status ) ) {
+			return $status;
+		}
+
+		$period = $this->get_remote_subscription_period(
+			$remote_subscription
+		);
 
 		if ( $period ) {
 			$period_result = $this->subscriptions->update_period(
@@ -400,6 +466,11 @@ final class ProcessPaymentEvent {
 		}
 
 		if ( $subscription->get_status() === $status ) {
+			/*
+			 * A renewal can keep the subscription active while changing
+			 * the billing period, so the period synchronization above still
+			 * matters even when the lifecycle status is unchanged.
+			 */
 			return true;
 		}
 
@@ -416,52 +487,159 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Extract the current billing period from a gateway resource.
+	 * Resolve the local status from the provider's current state.
 	 *
-	 * @param string $gateway    Gateway ID.
-	 * @param string $event_type Gateway event type.
-	 * @param array  $resource   Gateway resource.
-	 * @return array|false|\WP_Error
+	 * Payment failure is special because PayPal can keep the subscription
+	 * ACTIVE while a payment is temporarily failing. In that situation,
+	 * the latest failed-payment information determines whether the local
+	 * state should be past due.
+	 *
+	 * @param string $event_type        Event type.
+	 * @param array  $event_payload     Original event payload.
+	 * @param array  $remote_subscription Current provider resource.
+	 * @return string|\WP_Error
 	 */
-	private function get_subscription_period(
-		$gateway,
+	private function resolve_remote_status(
 		$event_type,
-		array $resource
+		array $event_payload,
+		array $remote_subscription
 	) {
-		if ( 'paypal' !== $gateway ) {
-			return false;
-		}
+		$remote_status = isset( $remote_subscription['status'] )
+			? strtoupper(
+				sanitize_key(
+					$remote_subscription['status']
+				)
+			)
+			: '';
 
-		if (
-			'BILLING.SUBSCRIPTION.ACTIVATED' !== $event_type
-			&& 'BILLING.SUBSCRIPTION.PAYMENT.SUCCEEDED' !== $event_type
-		) {
-			return false;
-		}
+		switch ( $remote_status ) {
+			case 'ACTIVE':
+				if (
+					'BILLING.SUBSCRIPTION.PAYMENT.FAILED' ===
+					$event_type
+				) {
+					$event_time = $this->get_event_time(
+						$event_payload
+					);
 
-		$billing_info = isset( $resource['billing_info'] )
-			&& is_array( $resource['billing_info'] )
-			? $resource['billing_info']
+					$billing_info = isset(
+						$remote_subscription['billing_info']
+					) && is_array(
+						$remote_subscription['billing_info']
+					)
+						? $remote_subscription['billing_info']
+						: array();
+
+					$last_payment_time =
+						isset(
+							$billing_info['last_payment']['time']
+						)
+						? (string) $billing_info['last_payment']['time']
+						: '';
+
+					$last_failed_payment_time =
+						isset(
+							$billing_info['last_failed_payment']['time']
+						)
+						? (string) $billing_info['last_failed_payment']['time']
+						: '';
+
+					/*
+					 * A later successful payment supersedes an older
+					 * failure, even if the failure webhook arrives late.
+					 */
+					if (
+						'' !== $event_time
+						&& '' !== $last_payment_time
+						&& $this->datetime_is_after(
+							$last_payment_time,
+							$event_time
+						)
+					) {
+						return Subscription::STATUS_ACTIVE;
+					}
+
+					if (
+						'' !== $last_failed_payment_time
+						&& (
+							'' === $event_time
+							|| ! $this->datetime_is_before(
+								$last_failed_payment_time,
+								$event_time
+							)
+						)
+					) {
+						return Subscription::STATUS_PAST_DUE;
+					}
+
+					return Subscription::STATUS_PAST_DUE;
+				}
+
+				return Subscription::STATUS_ACTIVE;
+
+			case 'SUSPENDED':
+				return Subscription::STATUS_SUSPENDED;
+
+			case 'CANCELLED':
+				return Subscription::STATUS_CANCELLED;
+
+			case 'EXPIRED':
+				return Subscription::STATUS_EXPIRED;
+
+			case 'APPROVAL_PENDING':
+			case 'APPROVED':
+				return Subscription::STATUS_PENDING;
+
+			default:
+				return new \WP_Error(
+					'dropkey_gateway_subscription_status_invalid',
+					__(
+						'The payment gateway returned an unsupported subscription status.',
+						'dropkey-wp'
+					),
+					array(
+						'gateway_status' => $remote_status,
+					)
+				);
+		}
+	}
+
+	/**
+	 * Get the current provider billing period.
+	 *
+	 * @param array $remote_subscription Current provider subscription.
+	 * @return array|false
+	 */
+	private function get_remote_subscription_period(
+		array $remote_subscription
+	) {
+		$billing_info = isset(
+			$remote_subscription['billing_info']
+		) && is_array(
+			$remote_subscription['billing_info']
+		)
+			? $remote_subscription['billing_info']
 			: array();
 
 		$period_start = '';
 
-		if ( 'BILLING.SUBSCRIPTION.ACTIVATED' === $event_type ) {
-			$period_start = isset( $resource['start_time'] )
-				? (string) $resource['start_time']
-				: '';
-		} else {
-			$last_payment = isset( $billing_info['last_payment'] )
-				&& is_array( $billing_info['last_payment'] )
-				? $billing_info['last_payment']
-				: array();
+		if (
+			isset( $billing_info['last_payment']['time'] )
+		) {
+			$period_start = (string) $billing_info['last_payment']['time'];
+		}
 
-			$period_start = isset( $last_payment['time'] )
-				? (string) $last_payment['time']
+		if ( '' === $period_start ) {
+			$period_start = isset(
+				$remote_subscription['start_time']
+			)
+				? (string) $remote_subscription['start_time']
 				: '';
 		}
 
-		$period_end = isset( $billing_info['next_billing_time'] )
+		$period_end = isset(
+			$billing_info['next_billing_time']
+		)
 			? (string) $billing_info['next_billing_time']
 			: '';
 
@@ -484,7 +662,66 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Convert a PayPal RFC3339 datetime to a UTC MySQL datetime.
+	 * Get the event creation time.
+	 *
+	 * @param array $payload Event payload.
+	 * @return string
+	 */
+	private function get_event_time( array $payload ) {
+		if (
+			empty( $payload['create_time'] )
+			|| ! is_string( $payload['create_time'] )
+		) {
+			return '';
+		}
+
+		return trim( $payload['create_time'] );
+	}
+
+	/**
+	 * Determine whether one RFC3339 datetime is after another.
+	 *
+	 * @param string $first  First datetime.
+	 * @param string $second Second datetime.
+	 * @return bool
+	 */
+	private function datetime_is_after( $first, $second ) {
+		$first_timestamp  = strtotime( $first );
+		$second_timestamp = strtotime( $second );
+
+		if (
+			false === $first_timestamp
+			|| false === $second_timestamp
+		) {
+			return false;
+		}
+
+		return $first_timestamp > $second_timestamp;
+	}
+
+	/**
+	 * Determine whether one RFC3339 datetime is before another.
+	 *
+	 * @param string $first  First datetime.
+	 * @param string $second Second datetime.
+	 * @return bool
+	 */
+	private function datetime_is_before( $first, $second ) {
+		$first_timestamp  = strtotime( $first );
+		$second_timestamp = strtotime( $second );
+
+		if (
+			false === $first_timestamp
+			|| false === $second_timestamp
+		) {
+			return false;
+		}
+
+		return $first_timestamp < $second_timestamp;
+	}
+
+	/**
+	 * Convert a PayPal RFC3339 datetime to UTC MySQL datetime.
 	 *
 	 * @param string $datetime PayPal datetime.
 	 * @return string
@@ -511,9 +748,9 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Map a gateway event to a DropKey subscription status.
+	 * Map a gateway event to a subscription status.
 	 *
-	 * @param string $event_type Gateway event type.
+	 * @param string $event_type Event type.
 	 * @return string
 	 */
 	private function map_event_to_status( $event_type ) {

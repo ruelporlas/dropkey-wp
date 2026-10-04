@@ -13,6 +13,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class GatewayEventRepository {
 
+	private const PROCESSING_TIMEOUT_SECONDS = 300;
+
 	private $wpdb;
 
 	private $table;
@@ -67,8 +69,12 @@ final class GatewayEventRepository {
 				'status'        => $data['status'],
 				'payload_hash'  => $data['payload_hash'],
 				'payload'       => $data['payload'],
-				'processed_at'  => isset( $data['processed_at'] ) ? $data['processed_at'] : null,
-				'error_message' => isset( $data['error_message'] ) ? $data['error_message'] : null,
+				'processed_at'  => isset( $data['processed_at'] )
+					? $data['processed_at']
+					: null,
+				'error_message' => isset( $data['error_message'] )
+					? $data['error_message']
+					: null,
 				'created_at'    => $created_at,
 				'updated_at'    => $created_at,
 			),
@@ -112,26 +118,38 @@ final class GatewayEventRepository {
 	}
 
 	/**
-	 * Atomically claim a received event for processing.
+	 * Atomically claim an event for processing.
 	 *
-	 * Only one concurrent request can successfully change the event
-	 * from received to processing.
+	 * A received event can be claimed normally. A processing event can
+	 * also be reclaimed when its processing lease has become stale.
 	 *
 	 * @param int $id Event ID.
 	 * @return true|\WP_Error
 	 */
 	public function claim_for_processing( $id ) {
+		$now = current_time( 'mysql', true );
+
 		$updated = $this->wpdb->query(
 			$this->wpdb->prepare(
 				"UPDATE {$this->table}
 				SET status = %s,
+					processed_at = NULL,
+					error_message = NULL,
 					updated_at = %s
 				WHERE id = %d
-				AND status = %s",
+				AND (
+					status = %s
+					OR (
+						status = %s
+						AND updated_at <= UTC_TIMESTAMP() - INTERVAL %d SECOND
+					)
+				)",
 				GatewayEvent::STATUS_PROCESSING,
-				current_time( 'mysql', true ),
+				$now,
 				absint( $id ),
-				GatewayEvent::STATUS_RECEIVED
+				GatewayEvent::STATUS_RECEIVED,
+				GatewayEvent::STATUS_PROCESSING,
+				self::PROCESSING_TIMEOUT_SECONDS
 			)
 		);
 
@@ -244,7 +262,10 @@ final class GatewayEventRepository {
 		if ( false === $updated ) {
 			return new \WP_Error(
 				'dropkey_gateway_event_retry_reset_failed',
-				__( 'The gateway event could not be reset for retry.', 'dropkey-wp' ),
+				__(
+					'The gateway event could not be reset for retry.',
+					'dropkey-wp'
+				),
 				array(
 					'db_error' => $this->wpdb->last_error,
 				)
@@ -288,7 +309,10 @@ final class GatewayEventRepository {
 		if ( false === $updated ) {
 			return new \WP_Error(
 				'dropkey_gateway_event_processed_failed',
-				__( 'The gateway event could not be marked as processed.', 'dropkey-wp' ),
+				__(
+					'The gateway event could not be marked as processed.',
+					'dropkey-wp'
+				),
 				array(
 					'db_error' => $this->wpdb->last_error,
 				)
