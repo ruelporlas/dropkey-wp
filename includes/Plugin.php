@@ -227,4 +227,4 @@ final class Plugin {
 			$test_console->register();
 		}
 	}
-}
+}  
