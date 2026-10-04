@@ -52,13 +52,6 @@ final class ProcessPaymentEvent {
 			$subscriptions
 		);
 
-		/*
-		 * ProcessPaymentEvent intentionally keeps its existing four-argument
-		 * constructor so existing Plugin bootstrap code remains compatible.
-		 *
-		 * CreateLicense needs the product and plan repositories, so construct
-		 * those repositories from the current WordPress database connection.
-		 */
 		global $wpdb;
 
 		$product_repository = new ProductRepository( $wpdb );
@@ -237,8 +230,15 @@ final class ProcessPaymentEvent {
 			}
 		}
 
+		/*
+		 * Keep the original ID because the record may be reloaded below.
+		 * If the reload fails, this ID is still required to release the
+		 * processing lock owned by this request.
+		 */
+		$event_id_number = $record->get_id();
+
 		$processing = $this->events->claim_for_processing(
-			$record->get_id()
+			$event_id_number
 		);
 
 		if ( is_wp_error( $processing ) ) {
@@ -247,9 +247,9 @@ final class ProcessPaymentEvent {
 				$processing->get_error_code()
 			) {
 				/*
-				 * Another request owns this event. The event is already
-				 * durably recorded, so acknowledge the webhook instead
-				 * of causing the provider to retry it unnecessarily.
+				 * Another request currently owns the processing lock.
+				 * The event is already durably recorded, so acknowledge
+				 * the webhook without attempting duplicate processing.
 				 */
 				return $record;
 			}
@@ -257,12 +257,20 @@ final class ProcessPaymentEvent {
 			return $processing;
 		}
 
+		/*
+		 * Reload the event after claiming it so all processing uses the
+		 * state that was actually claimed by this request.
+		 */
 		$record = $this->events->find_by_gateway_event(
 			$gateway,
 			$event_id
 		);
 
 		if ( ! $record ) {
+			$this->events->release_processing_lock(
+				$event_id_number
+			);
+
 			return new \WP_Error(
 				'dropkey_gateway_event_reload_failed',
 				__(
@@ -286,7 +294,10 @@ final class ProcessPaymentEvent {
 				)
 			);
 
-			$this->fail_event( $record, $error );
+			$this->fail_event(
+				$record,
+				$error
+			);
 
 			return $error;
 		}
@@ -329,7 +340,8 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Mark an event as failed and notify integrations.
+	 * Mark an event as failed, release its processing lock,
+	 * and notify integrations.
 	 *
 	 * @param GatewayEvent $record Event.
 	 * @param \WP_Error    $error  Error.
@@ -339,11 +351,35 @@ final class ProcessPaymentEvent {
 		GatewayEvent $record,
 		\WP_Error $error
 	) {
-		$this->events->update_status(
+		$updated = $this->events->update_status(
 			$record->get_id(),
 			GatewayEvent::STATUS_FAILED,
 			$error->get_error_message()
 		);
+
+		$released = $this->events->release_processing_lock(
+			$record->get_id()
+		);
+
+		if ( is_wp_error( $updated ) ) {
+			error_log(
+				sprintf(
+					'DropKey WP: Failed to mark gateway event #%d as failed: %s',
+					absint( $record->get_id() ),
+					$updated->get_error_message()
+				)
+			);
+		}
+
+		if ( is_wp_error( $released ) ) {
+			error_log(
+				sprintf(
+					'DropKey WP: Failed to release processing lock for gateway event #%d: %s',
+					absint( $record->get_id() ),
+					$released->get_error_message()
+				)
+			);
+		}
 
 		do_action(
 			'dropkey_wp_gateway_event_failed',
@@ -482,8 +518,8 @@ final class ProcessPaymentEvent {
 
 		/*
 		 * Change the subscription status before synchronizing the
-		 * entitlement. The lifecycle action fired by ChangeSubscriptionStatus
-		 * receives the newly persisted subscription state.
+		 * entitlement. The lifecycle action fired by
+		 * ChangeSubscriptionStatus receives the newly persisted state.
 		 */
 		if ( $subscription->get_status() !== $status ) {
 			$result = $this->change_status->execute(
@@ -496,9 +532,9 @@ final class ProcessPaymentEvent {
 			}
 
 			/*
-			 * WordPress actions do not return callback errors. Therefore
-			 * explicitly ensure an ACTIVE subscription has a license before
-			 * the gateway event is marked as successfully processed.
+			 * WordPress actions do not return callback errors. Explicitly
+			 * ensure an ACTIVE subscription has a license before this
+			 * gateway event is considered successfully processed.
 			 *
 			 * CreateLicense is idempotent, so this is safe even when the
 			 * activation lifecycle hook already created the license.
@@ -621,11 +657,6 @@ final class ProcessPaymentEvent {
 						)
 						: 0;
 
-					/*
-					 * PayPal resets the failed-payment count after a
-					 * successful payment. This makes the current provider
-					 * state safer than comparing webhook timestamps.
-					 */
 					if ( $failed_payments_count > 0 ) {
 						return Subscription::STATUS_PAST_DUE;
 					}
@@ -767,4 +798,3 @@ final class ProcessPaymentEvent {
 			: '';
 	}
 }
-
