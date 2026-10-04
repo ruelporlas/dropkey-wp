@@ -10,6 +10,7 @@ namespace DropKeyWP\Admin;
 use DropKeyWP\Application\ChangeProductStatus;
 use DropKeyWP\Application\CreateProduct;
 use DropKeyWP\Application\UpdateProduct;
+use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Domain\ProductStatus;
 use DropKeyWP\Domain\ProductType;
@@ -26,12 +27,24 @@ final class ProductAdmin {
 	private $products;
 
 	/**
+	 * Plan repository.
+	 *
+	 * @var PlanRepository
+	 */
+	private $plans;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param ProductRepository $products Product repository.
+	 * @param PlanRepository    $plans    Plan repository.
 	 */
-	public function __construct( ProductRepository $products ) {
+	public function __construct(
+		ProductRepository $products,
+		PlanRepository $plans
+	) {
 		$this->products = $products;
+		$this->plans    = $plans;
 	}
 
 	/**
@@ -101,12 +114,9 @@ final class ProductAdmin {
 		);
 
 		/*
-		 * Edit Product must remain a properly registered submenu page.
-		 *
-		 * It is intentionally hidden from the sidebar through admin CSS
-		 * rather than removed from WordPress's registered submenu pages.
-		 * This allows direct access from the Products list while preserving
-		 * WordPress's normal admin page registration and access handling.
+		 * Edit Product remains registered as a submenu page so WordPress
+		 * handles capability checks and direct access normally. It is hidden
+		 * from the sidebar and reached from the Products list.
 		 */
 		add_submenu_page(
 			'dropkey-wp-products',
@@ -120,8 +130,6 @@ final class ProductAdmin {
 
 	/**
 	 * Hide the Edit Product submenu item from the sidebar.
-	 *
-	 * The page remains registered and accessible through its direct URL.
 	 *
 	 * @return void
 	 */
@@ -268,6 +276,14 @@ final class ProductAdmin {
 										href="<?php echo esc_url( $this->get_edit_url( $product->get_id() ) ); ?>"
 									>
 										<?php echo esc_html__( 'Edit', 'dropkey-wp' ); ?>
+									</a>
+
+									<span aria-hidden="true"> | </span>
+
+									<a
+										href="<?php echo esc_url( $this->get_plans_url( $product->get_id() ) ); ?>"
+									>
+										<?php echo esc_html__( 'Plans', 'dropkey-wp' ); ?>
 									</a>
 
 									<?php if ( ProductStatus::ACTIVE === $product->get_status() ) : ?>
@@ -509,6 +525,8 @@ final class ProductAdmin {
 				);
 				?>
 			</form>
+
+			<?php $this->render_product_plans( $product_id ); ?>
 		</div>
 		<?php
 	}
@@ -698,6 +716,287 @@ final class ProductAdmin {
 			</a>
 		</p>
 		<?php
+	}
+
+	/**
+	 * Render plans assigned to a product.
+	 *
+	 * @param int $product_id Product ID.
+	 * @return void
+	 */
+	private function render_product_plans( $product_id ) {
+		$plans = $this->plans->all_by_product( $product_id );
+
+		?>
+		<div
+			class="postbox"
+			style="margin-top:20px;"
+		>
+			<div class="postbox-header">
+				<h2 class="hndle">
+					<?php echo esc_html__( 'Plans', 'dropkey-wp' ); ?>
+				</h2>
+			</div>
+
+			<div class="inside">
+
+				<p>
+					<?php
+					echo esc_html__(
+						'Plans define how customers subscribe to this product.',
+						'dropkey-wp'
+					);
+					?>
+				</p>
+
+				<p>
+					<a
+						class="button button-primary"
+						href="<?php echo esc_url( $this->get_add_plan_url( $product_id ) ); ?>"
+					>
+						<?php echo esc_html__( 'Add Plan', 'dropkey-wp' ); ?>
+					</a>
+
+					<a
+						class="button"
+						href="<?php echo esc_url( $this->get_plans_url( $product_id ) ); ?>"
+					>
+						<?php echo esc_html__( 'Manage Plans', 'dropkey-wp' ); ?>
+					</a>
+				</p>
+
+				<?php if ( empty( $plans ) ) : ?>
+
+					<p>
+						<?php
+						echo esc_html__(
+							'No plans have been assigned to this product yet.',
+							'dropkey-wp'
+						);
+						?>
+					</p>
+
+				<?php else : ?>
+
+					<table class="widefat fixed striped">
+						<thead>
+							<tr>
+								<th scope="col">
+									<?php echo esc_html__( 'Name', 'dropkey-wp' ); ?>
+								</th>
+
+								<th scope="col">
+									<?php echo esc_html__( 'Price', 'dropkey-wp' ); ?>
+								</th>
+
+								<th scope="col">
+									<?php echo esc_html__( 'Billing', 'dropkey-wp' ); ?>
+								</th>
+
+								<th scope="col">
+									<?php echo esc_html__( 'Activations', 'dropkey-wp' ); ?>
+								</th>
+
+								<th scope="col">
+									<?php echo esc_html__( 'Status', 'dropkey-wp' ); ?>
+								</th>
+
+								<th scope="col">
+									<?php echo esc_html__( 'Actions', 'dropkey-wp' ); ?>
+								</th>
+							</tr>
+						</thead>
+
+						<tbody>
+							<?php foreach ( $plans as $plan ) : ?>
+
+								<tr>
+									<td>
+										<strong>
+											<?php echo esc_html( $plan->get_name() ); ?>
+										</strong>
+									</td>
+
+									<td>
+										<?php
+										echo esc_html(
+											$this->format_plan_price( $plan )
+										);
+										?>
+									</td>
+
+									<td>
+										<?php
+										echo esc_html(
+											$this->format_plan_billing( $plan )
+										);
+										?>
+									</td>
+
+									<td>
+										<?php
+										echo esc_html(
+											$plan->get_activation_limit()
+										);
+										?>
+									</td>
+
+									<td>
+										<?php
+										echo esc_html(
+											$this->get_plan_status_label(
+												$plan->get_status()
+											)
+										);
+										?>
+									</td>
+
+									<td>
+										<a
+											href="<?php echo esc_url( $this->get_plan_edit_url( $plan->get_id() ) ); ?>"
+										>
+											<?php echo esc_html__( 'Edit', 'dropkey-wp' ); ?>
+										</a>
+									</td>
+								</tr>
+
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+
+				<?php endif; ?>
+
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Get plans URL.
+	 *
+	 * @param int $product_id Product ID.
+	 * @return string
+	 */
+	private function get_plans_url( $product_id ) {
+		return add_query_arg(
+			array(
+				'page'       => 'dropkey-wp-plans',
+				'product_id' => absint( $product_id ),
+			),
+			admin_url( 'admin.php' )
+		);
+	}
+
+	/**
+	 * Get add plan URL.
+	 *
+	 * @param int $product_id Product ID.
+	 * @return string
+	 */
+	private function get_add_plan_url( $product_id ) {
+		return add_query_arg(
+			array(
+				'page'       => 'dropkey-wp-plan-add',
+				'product_id' => absint( $product_id ),
+			),
+			admin_url( 'admin.php' )
+		);
+	}
+
+	/**
+	 * Get plan edit URL.
+	 *
+	 * @param int $plan_id Plan ID.
+	 * @return string
+	 */
+	private function get_plan_edit_url( $plan_id ) {
+		return add_query_arg(
+			array(
+				'page'    => 'dropkey-wp-plan-edit',
+				'plan_id' => absint( $plan_id ),
+			),
+			admin_url( 'admin.php' )
+		);
+	}
+
+	/**
+	 * Format plan price.
+	 *
+	 * @param object $plan Plan object.
+	 * @return string
+	 */
+	private function format_plan_price( $plan ) {
+		if (
+			method_exists( $plan, 'is_free' )
+			&& $plan->is_free()
+		) {
+			return __( 'Free', 'dropkey-wp' );
+		}
+
+		return sprintf(
+			'%1$s %2$s',
+			$plan->get_currency(),
+			number_format_i18n(
+				(float) $plan->get_price(),
+				2
+			)
+		);
+	}
+
+	/**
+	 * Format plan billing.
+	 *
+	 * @param object $plan Plan object.
+	 * @return string
+	 */
+	private function format_plan_billing( $plan ) {
+		if (
+			method_exists( $plan, 'is_free' )
+			&& $plan->is_free()
+		) {
+			return __( 'No billing', 'dropkey-wp' );
+		}
+
+		$count    = (int) $plan->get_billing_interval_count();
+		$interval = $plan->get_billing_interval();
+
+		$labels = array(
+			'day'   => 'day',
+			'week'  => 'week',
+			'month' => 'month',
+			'year'  => 'year',
+		);
+
+		$label = isset( $labels[ $interval ] )
+			? $labels[ $interval ]
+			: $interval;
+
+		if ( 1 !== $count ) {
+			$label .= 's';
+		}
+
+		return sprintf(
+			__( 'Every %1$d %2$s', 'dropkey-wp' ),
+			$count,
+			$label
+		);
+	}
+
+	/**
+	 * Get plan status label.
+	 *
+	 * @param string $status Plan status.
+	 * @return string
+	 */
+	private function get_plan_status_label( $status ) {
+		$labels = array(
+			'active'   => __( 'Active', 'dropkey-wp' ),
+			'archived' => __( 'Archived', 'dropkey-wp' ),
+		);
+
+		return isset( $labels[ $status ] )
+			? $labels[ $status ]
+			: $status;
 	}
 
 	/**
