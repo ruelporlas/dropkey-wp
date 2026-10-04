@@ -10,6 +10,7 @@ namespace DropKeyWP;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
+use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
@@ -19,6 +20,7 @@ use DropKeyWP\Database\Repositories\GatewayEventRepository;
 use DropKeyWP\Database\Repositories\LicenseRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
+use DropKeyWP\Database\Repositories\SubscriptionEventRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Frontend\ProductCheckout;
 use DropKeyWP\Gateways\GatewayManager;
@@ -74,13 +76,14 @@ final class Plugin {
 
 		global $wpdb;
 
-		$activation_repository   = new ActivationRepository( $wpdb );
-		$customer_repository     = new CustomerRepository( $wpdb );
-		$gateway_event_repository = new GatewayEventRepository( $wpdb );
-		$license_repository      = new LicenseRepository( $wpdb );
-		$plan_repository         = new PlanRepository( $wpdb );
-		$product_repository      = new ProductRepository( $wpdb );
-		$subscription_repository = new SubscriptionRepository( $wpdb );
+		$activation_repository        = new ActivationRepository( $wpdb );
+		$customer_repository          = new CustomerRepository( $wpdb );
+		$gateway_event_repository    = new GatewayEventRepository( $wpdb );
+		$license_repository           = new LicenseRepository( $wpdb );
+		$plan_repository              = new PlanRepository( $wpdb );
+		$product_repository           = new ProductRepository( $wpdb );
+		$subscription_event_repository = new SubscriptionEventRepository( $wpdb );
+		$subscription_repository      = new SubscriptionRepository( $wpdb );
 
 		/*
 		 * Payment gateways register themselves through GatewayManager.
@@ -112,6 +115,14 @@ final class Plugin {
 			$product_repository,
 			$plan_repository,
 			$subscription_repository
+		);
+
+		/*
+		 * Subscription lifecycle changes.
+		 */
+		$change_subscription_status = new ChangeSubscriptionStatus(
+			$subscription_repository,
+			$subscription_event_repository
 		);
 
 		/*
@@ -181,7 +192,8 @@ final class Plugin {
 				$subscription_repository,
 				$customer_repository,
 				$product_repository,
-				$plan_repository
+				$plan_repository,
+				$change_subscription_status
 			);
 
 			$subscription_admin->register();

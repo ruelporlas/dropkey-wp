@@ -11,7 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class Schema {
 
-	public const VERSION = 2;
+	public const VERSION = 3;
 
 	public static function get_tables( \wpdb $wpdb ) {
 		$charset_collate = $wpdb->get_charset_collate();
@@ -159,6 +159,21 @@ final class Schema {
 				UNIQUE KEY gateway_event (gateway,event_id),
 				KEY status (status),
 				KEY event_type (event_type)
+			) {$charset_collate};",
+
+			"CREATE TABLE {$wpdb->prefix}dropkey_subscription_events (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				subscription_id bigint(20) unsigned NOT NULL,
+				event_type varchar(50) NOT NULL,
+				previous_status varchar(20) NOT NULL,
+				new_status varchar(20) NOT NULL,
+				actor_user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				created_at datetime NOT NULL,
+				PRIMARY KEY  (id),
+				KEY subscription_id (subscription_id),
+				KEY event_type (event_type),
+				KEY actor_user_id (actor_user_id),
+				KEY created_at (created_at)
 			) {$charset_collate};",
 		);
 	}
