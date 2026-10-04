@@ -46,6 +46,11 @@ final class ProductAdmin {
 		);
 
 		add_action(
+			'admin_head',
+			array( $this, 'hide_edit_product_menu_item' )
+		);
+
+		add_action(
 			'admin_post_dropkey_wp_create_product',
 			array( $this, 'handle_create_product' )
 		);
@@ -96,19 +101,38 @@ final class ProductAdmin {
 		);
 
 		/*
-		 * Edit Product is intentionally hidden from the sidebar.
+		 * Edit Product must remain a properly registered submenu page.
 		 *
-		 * The edit screen is accessed through the Edit action
-		 * in the Products list.
+		 * It is intentionally hidden from the sidebar through admin CSS
+		 * rather than removed from WordPress's registered submenu pages.
+		 * This allows direct access from the Products list while preserving
+		 * WordPress's normal admin page registration and access handling.
 		 */
 		add_submenu_page(
-			null,
+			'dropkey-wp-products',
 			__( 'Edit Product', 'dropkey-wp' ),
 			__( 'Edit Product', 'dropkey-wp' ),
 			'manage_options',
 			'dropkey-wp-product-edit',
 			array( $this, 'render_edit_product_page' )
 		);
+	}
+
+	/**
+	 * Hide the Edit Product submenu item from the sidebar.
+	 *
+	 * The page remains registered and accessible through its direct URL.
+	 *
+	 * @return void
+	 */
+	public function hide_edit_product_menu_item() {
+		?>
+		<style>
+			#toplevel_page_dropkey-wp-products .wp-submenu a[href*="page=dropkey-wp-product-edit"] {
+				display: none;
+			}
+		</style>
+		<?php
 	}
 
 	/**
