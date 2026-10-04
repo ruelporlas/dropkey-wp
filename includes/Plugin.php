@@ -308,7 +308,7 @@ final class Plugin {
 
 		?>
 
-```
+
 	<div class="wrap">
 		<h1><?php echo esc_html__( 'DropKey WP', 'dropkey-wp' ); ?></h1>
 
