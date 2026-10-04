@@ -11,6 +11,7 @@ use DropKeyWP\Admin\CustomerAdmin;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
+use DropKeyWP\Admin\LicenseAdmin;
 use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Application\CreateLicense;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
@@ -209,6 +210,15 @@ final class Plugin {
 			);
 
 			$customer_admin->register();
+
+			$license_admin = new LicenseAdmin(
+	$license_repository,
+	$activation_repository,
+	$customer_repository,
+	$product_repository
+);
+
+$license_admin->register();
 
 			$subscription_admin = new SubscriptionAdmin(
 				$subscription_repository,
