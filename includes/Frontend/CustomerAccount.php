@@ -7,7 +7,6 @@
 
 namespace DropKeyWP\Frontend;
 
-use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\LicenseRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
@@ -72,8 +71,17 @@ final class CustomerAccount {
 			$customer->get_id()
 		);
 
-		$products = new ProductRepository( $this->get_wpdb() );
-		$plans    = new PlanRepository( $this->get_wpdb() );
+		$products = new ProductRepository(
+			$this->get_wpdb()
+		);
+
+		$plans = new PlanRepository(
+			$this->get_wpdb()
+		);
+
+		$rest_url = rest_url(
+			'dropkey-wp/v1/license/activate'
+		);
 
 		ob_start();
 		?>
@@ -225,7 +233,10 @@ final class CustomerAccount {
 													? $product->get_name()
 													: sprintf(
 														/* translators: %d: product ID. */
-														__( 'Product #%d', 'dropkey-wp' ),
+														__(
+															'Product #%d',
+															'dropkey-wp'
+														),
 														$subscription->get_product_id()
 													)
 											);
@@ -235,7 +246,11 @@ final class CustomerAccount {
 										<?php if ( $plan ) : ?>
 
 											<p>
-												<?php echo esc_html( $plan->get_name() ); ?>
+												<?php
+												echo esc_html(
+													$plan->get_name()
+												);
+												?>
 											</p>
 
 										<?php endif; ?>
@@ -291,7 +306,7 @@ final class CustomerAccount {
 													$subscription->get_gateway()
 												)
 											);
-										?>
+											?>
 										</strong>
 									</div>
 
@@ -356,6 +371,15 @@ final class CustomerAccount {
 							);
 							?>
 						</h3>
+
+						<p>
+							<?php
+							echo esc_html__(
+								'Manage the sites where your licensed product is activated.',
+								'dropkey-wp'
+							);
+							?>
+						</p>
 					</div>
 				</div>
 
@@ -386,9 +410,24 @@ final class CustomerAccount {
 							$activations = $this->get_activations(
 								$license->get_id()
 							);
+
+							$active_activation_count =
+								$this->count_active_activations(
+									$activations
+								);
+
+							$activation_available =
+								License::STATUS_ACTIVE === $license->get_status()
+								&& $active_activation_count < $license->get_activation_limit()
+								&& $this->license_is_current(
+									$license->get_expires_at()
+								);
 							?>
 
-							<article class="dropkey-account-card">
+							<article
+								class="dropkey-account-card"
+								data-license-card="<?php echo esc_attr( $license->get_id() ); ?>"
+							>
 
 								<div class="dropkey-account-card-header">
 
@@ -400,7 +439,10 @@ final class CustomerAccount {
 													? $product->get_name()
 													: sprintf(
 														/* translators: %d: product ID. */
-														__( 'Product #%d', 'dropkey-wp' ),
+														__(
+															'Product #%d',
+															'dropkey-wp'
+														),
 														$license->get_product_id()
 													)
 											);
@@ -459,13 +501,13 @@ final class CustomerAccount {
 										</span>
 
 										<strong>
-											<?php
-											echo esc_html(
-												$this->count_active_activations(
-													$activations
-												)
-											);
-											?>
+											<span class="dropkey-account-activation-count">
+												<?php
+												echo esc_html(
+													$active_activation_count
+												);
+												?>
+											</span>
 											/
 											<?php
 											echo esc_html(
@@ -544,6 +586,159 @@ final class CustomerAccount {
 
 								<?php endif; ?>
 
+								<?php if ( $activation_available ) : ?>
+
+									<div class="dropkey-account-activate">
+
+										<div class="dropkey-account-activate-heading">
+											<h5>
+												<?php
+												echo esc_html__(
+													'Activate another site',
+													'dropkey-wp'
+												);
+												?>
+											</h5>
+
+											<p>
+												<?php
+												echo esc_html__(
+													'Enter the full URL of the WordPress site where you want to use this license.',
+													'dropkey-wp'
+												);
+												?>
+											</p>
+										</div>
+
+										<form
+											class="dropkey-account-activation-form"
+											data-license-id="<?php echo esc_attr( $license->get_id() ); ?>"
+											data-license-key="<?php echo esc_attr( $license->get_license_key() ); ?>"
+											data-product="<?php echo esc_attr( $product ? $product->get_slug() : '' ); ?>"
+											data-endpoint="<?php echo esc_url( $rest_url ); ?>"
+										>
+
+											<div class="dropkey-account-form-row">
+
+												<label>
+													<span>
+														<?php
+														echo esc_html__(
+															'Site URL',
+															'dropkey-wp'
+														);
+														?>
+													</span>
+
+													<input
+														type="url"
+														name="site_url"
+														placeholder="https://example.com"
+														required
+													>
+												</label>
+
+												<button
+													type="submit"
+													class="dropkey-account-button"
+												>
+													<?php
+													echo esc_html__(
+														'Activate Site',
+														'dropkey-wp'
+													);
+													?>
+												</button>
+
+											</div>
+
+											<div
+												class="dropkey-account-form-message"
+												hidden
+											></div>
+
+										</form>
+
+									</div>
+
+								<?php elseif ( License::STATUS_ACTIVE !== $license->get_status() ) : ?>
+
+									<div class="dropkey-account-notice">
+										<?php
+										echo esc_html__(
+											'This license is not currently available for activation.',
+											'dropkey-wp'
+										);
+										?>
+									</div>
+
+								<?php elseif ( ! $this->license_is_current( $license->get_expires_at() ) ) : ?>
+
+									<div class="dropkey-account-notice">
+										<?php
+										echo esc_html__(
+											'This license has expired and cannot be activated.',
+											'dropkey-wp'
+										);
+										?>
+									</div>
+
+								<?php else : ?>
+
+									<div class="dropkey-account-notice">
+										<?php
+										echo esc_html__(
+											'The activation limit for this license has been reached. Deactivate an existing site before activating another.',
+											'dropkey-wp'
+										);
+										?>
+									</div>
+
+								<?php endif; ?>
+
+								<div
+									class="dropkey-account-token-result"
+									data-token-result="<?php echo esc_attr( $license->get_id() ); ?>"
+									hidden
+								>
+									<div class="dropkey-account-token-result-heading">
+										<strong>
+											<?php
+											echo esc_html__(
+												'Activation successful',
+												'dropkey-wp'
+											);
+											?>
+										</strong>
+
+										<span>
+											<?php
+											echo esc_html__(
+												'Save this API token now. It will not be displayed again.',
+												'dropkey-wp'
+											);
+											?>
+										</span>
+									</div>
+
+									<div class="dropkey-account-token-row">
+										<code data-api-token></code>
+
+										<button
+											type="button"
+											class="dropkey-account-copy-button"
+											data-copy-token
+										>
+											<?php
+											echo esc_html__(
+												'Copy',
+												'dropkey-wp'
+											);
+											?>
+										</button>
+									</div>
+								</div>
+
 							</article>
 
 						<?php endforeach; ?>
@@ -556,9 +751,10 @@ final class CustomerAccount {
 
 		</div>
 
-		<?php $this->render_styles(); ?>
-
 		<?php
+
+		$this->render_scripts();
+		$this->render_styles();
 
 		return ob_get_clean();
 	}
@@ -648,6 +844,7 @@ final class CustomerAccount {
 	 * Count active licenses.
 	 *
 	 * @param License[] $licenses Licenses.
+	 * @param string    $status   Status.
 	 * @return int
 	 */
 	private function count_licenses_by_status( $licenses, $status ) {
@@ -681,6 +878,31 @@ final class CustomerAccount {
 	}
 
 	/**
+	 * Determine whether a license is currently within its entitlement period.
+	 *
+	 * @param string $expires_at Expiration timestamp.
+	 * @return bool
+	 */
+	private function license_is_current( $expires_at ) {
+		if ( '' === $expires_at ) {
+			return true;
+		}
+
+		$timestamp = strtotime(
+			$expires_at . ' UTC'
+		);
+
+		if ( false === $timestamp ) {
+			return true;
+		}
+
+		return $timestamp >= current_time(
+			'timestamp',
+			true
+		);
+	}
+
+	/**
 	 * Get customer display name.
 	 *
 	 * @param \DropKeyWP\Domain\Customer $customer Customer.
@@ -700,7 +922,10 @@ final class CustomerAccount {
 			$customer->get_user_id()
 		);
 
-		if ( $user && '' !== trim( $user->display_name ) ) {
+		if (
+			$user
+			&& '' !== trim( $user->display_name )
+		) {
 			return $user->display_name;
 		}
 
@@ -711,7 +936,7 @@ final class CustomerAccount {
 	 * Render a status badge.
 	 *
 	 * @param string $status Status.
-	 * @param string $type Entity type.
+	 * @param string $type   Entity type.
 	 * @return string
 	 */
 	private function render_status_badge( $status, $type ) {
@@ -739,7 +964,10 @@ final class CustomerAccount {
 		} elseif (
 			in_array(
 				$status,
-				array( 'past_due', 'suspended' ),
+				array(
+					'past_due',
+					'suspended',
+				),
 				true
 			)
 		) {
@@ -747,7 +975,12 @@ final class CustomerAccount {
 		} elseif (
 			in_array(
 				$status,
-				array( 'cancelled', 'expired', 'revoked', 'deactivated' ),
+				array(
+					'cancelled',
+					'expired',
+					'revoked',
+					'deactivated',
+				),
 				true
 			)
 		) {
@@ -775,7 +1008,10 @@ final class CustomerAccount {
 
 		return ucwords(
 			str_replace(
-				array( '_', '-' ),
+				array(
+					'_',
+					'-',
+				),
 				' ',
 				$gateway
 			)
@@ -786,7 +1022,7 @@ final class CustomerAccount {
 	 * Format date range.
 	 *
 	 * @param string $start Start datetime.
-	 * @param string $end End datetime.
+	 * @param string $end   End datetime.
 	 * @return string
 	 */
 	private function format_date_range( $start, $end ) {
@@ -794,8 +1030,8 @@ final class CustomerAccount {
 		$formatted_end   = $this->format_datetime( $end );
 
 		if (
-			'Not set' === $formatted_start &&
-			'Not set' === $formatted_end
+			'Not set' === $formatted_start
+			&& 'Not set' === $formatted_end
 		) {
 			return __( 'Not available', 'dropkey-wp' );
 		}
@@ -839,7 +1075,7 @@ final class CustomerAccount {
 	 * Render a frontend message.
 	 *
 	 * @param string $message Message.
-	 * @param string $type Message type.
+	 * @param string $type    Message type.
 	 * @return string
 	 */
 	private function render_message( $message, $type = 'info' ) {
@@ -855,6 +1091,415 @@ final class CustomerAccount {
 		$this->render_styles();
 
 		return ob_get_clean();
+	}
+
+	/**
+	 * Render activation JavaScript.
+	 *
+	 * @return void
+	 */
+	private function render_scripts() {
+		?>
+		<script>
+			document.addEventListener('DOMContentLoaded', function () {
+				var forms = document.querySelectorAll(
+					'.dropkey-account-activation-form'
+				);
+
+				forms.forEach(function (form) {
+					form.addEventListener('submit', function (event) {
+						event.preventDefault();
+
+						var button = form.querySelector(
+							'button[type="submit"]'
+						);
+
+						var input = form.querySelector(
+							'input[name="site_url"]'
+						);
+
+						var message = form.querySelector(
+							'.dropkey-account-form-message'
+						);
+
+						var endpoint = form.getAttribute(
+							'data-endpoint'
+						);
+
+						var licenseKey = form.getAttribute(
+							'data-license-key'
+						);
+
+						var product = form.getAttribute(
+							'data-product'
+						);
+
+						var licenseId = form.getAttribute(
+							'data-license-id'
+						);
+
+						var card = form.closest(
+							'[data-license-card]'
+						);
+
+						var tokenResult = card
+							? card.querySelector(
+								'[data-token-result="' +
+								licenseId +
+								'"]'
+							)
+							: null;
+
+						if (
+							! input
+							|| ''
+								=== input.value.trim()
+						) {
+							showMessage(
+								message,
+								'Please enter a site URL.',
+								true
+							);
+
+							return;
+						}
+
+						button.disabled = true;
+						button.classList.add('is-loading');
+
+						showMessage(
+							message,
+							'Activating site…',
+							false
+						);
+
+						fetch(
+							endpoint,
+							{
+								method: 'POST',
+								headers: {
+									'Content-Type':
+										'application/json'
+								},
+								body: JSON.stringify(
+									{
+										license_key:
+											licenseKey,
+										product:
+											product,
+										site_url:
+											input.value.trim()
+									}
+								)
+							}
+						)
+							.then(function (response) {
+								return response
+									.json()
+									.then(function (data) {
+										return {
+											ok:
+												response.ok,
+											data:
+												data
+										};
+									});
+							})
+							.then(function (result) {
+								if (! result.ok) {
+									throw new Error(
+										getErrorMessage(
+											result.data
+										)
+									);
+								}
+
+								var data = result.data;
+
+								if (
+									tokenResult
+									&& data.api_token
+								) {
+									var token =
+										tokenResult.querySelector(
+											'[data-api-token]'
+										);
+
+									if (token) {
+										token.textContent =
+											data.api_token;
+									}
+
+									tokenResult.hidden = false;
+								}
+
+								showMessage(
+									message,
+									'Site activated successfully.',
+									false
+								);
+
+								input.value = '';
+
+								updateActivationCount(
+									card
+								);
+
+								button.disabled = true;
+								button.classList.remove(
+									'is-loading'
+								);
+
+								if (
+									data.activation
+									&& data.activation.site_url
+								) {
+									appendActivation(
+										card,
+										data.activation
+									);
+								}
+							})
+							.catch(function (error) {
+								showMessage(
+									message,
+									error.message ||
+										'The activation could not be completed.',
+									true
+								);
+
+								button.disabled = false;
+								button.classList.remove(
+									'is-loading'
+								);
+							});
+					});
+				});
+
+				var copyButtons = document.querySelectorAll(
+					'[data-copy-token]'
+				);
+
+				copyButtons.forEach(function (button) {
+					button.addEventListener(
+						'click',
+						function () {
+							var container =
+								button.closest(
+									'.dropkey-account-token-result'
+								);
+
+							var token =
+								container
+									? container.querySelector(
+										'[data-api-token]'
+									)
+									: null;
+
+							if (
+								! token
+								|| ''
+									=== token.textContent
+							) {
+								return;
+							}
+
+							if (
+								navigator.clipboard
+								&& navigator.clipboard.writeText
+							) {
+								navigator.clipboard
+									.writeText(
+										token.textContent
+									)
+									.then(function () {
+										button.textContent =
+											'Copied';
+
+										setTimeout(
+											function () {
+												button.textContent =
+													'Copy';
+											},
+											1800
+										);
+									});
+							}
+						}
+					);
+				});
+
+				function showMessage(
+					element,
+					text,
+					isError
+				) {
+					if (! element) {
+						return;
+					}
+
+					element.textContent = text;
+					element.hidden = false;
+
+					element.classList.toggle(
+						'is-error',
+						!! isError
+					);
+
+					element.classList.toggle(
+						'is-success',
+						! isError
+					);
+				}
+
+				function getErrorMessage(data) {
+					if (
+						data
+						&& data.message
+					) {
+						return data.message;
+					}
+
+					return 'The activation could not be completed.';
+				}
+
+				function updateActivationCount(card) {
+					if (! card) {
+						return;
+					}
+
+					var count =
+						card.querySelector(
+							'.dropkey-account-activation-count'
+						);
+
+					if (! count) {
+						return;
+					}
+
+					var current =
+						parseInt(
+							count.textContent,
+							10
+						);
+
+					if (
+						Number.isNaN(current)
+					) {
+						return;
+					}
+
+					count.textContent =
+						String(current + 1);
+				}
+
+				function appendActivation(
+					card,
+					activation
+				) {
+					if (! card) {
+						return;
+					}
+
+					var container =
+						card.querySelector(
+							'.dropkey-account-activations'
+						);
+
+					if (! container) {
+						container =
+							document.createElement(
+								'div'
+							);
+
+						container.className =
+							'dropkey-account-activations';
+
+						var heading =
+							document.createElement(
+								'h5'
+							);
+
+						heading.textContent =
+							'Activations';
+
+						container.appendChild(
+							heading
+						);
+
+						var activateSection =
+							card.querySelector(
+								'.dropkey-account-activate'
+							);
+
+						if (activateSection) {
+							card.insertBefore(
+								container,
+								activateSection
+							);
+						} else {
+							card.appendChild(
+								container
+							);
+						}
+					}
+
+					var row =
+						document.createElement(
+							'div'
+						);
+
+					row.className =
+						'dropkey-account-activation';
+
+					var details =
+						document.createElement(
+							'div'
+						);
+
+					var site =
+						document.createElement(
+							'strong'
+						);
+
+					site.textContent =
+						activation.site_url || '';
+
+					var date =
+						document.createElement(
+							'span'
+						);
+
+					date.textContent =
+						'Just now';
+
+					details.appendChild(site);
+					details.appendChild(date);
+
+					var status =
+						document.createElement(
+							'span'
+						);
+
+					status.className =
+						'dropkey-account-status is-active';
+
+					status.setAttribute(
+						'data-type',
+						'activation'
+					);
+
+					status.textContent =
+						'Active';
+
+					row.appendChild(details);
+					row.appendChild(status);
+
+					container.appendChild(row);
+				}
+			});
+		</script>
+		<?php
 	}
 
 	/**
@@ -954,6 +1599,12 @@ final class CustomerAccount {
 				font-size: 21px;
 			}
 
+			.dropkey-account-section-heading p {
+				margin: 6px 0 0;
+				color: #646970;
+				font-size: 14px;
+			}
+
 			.dropkey-account-list {
 				display: grid;
 				gap: 16px;
@@ -1047,8 +1698,9 @@ final class CustomerAccount {
 				border-top: 1px solid #f0f0f1;
 			}
 
-			.dropkey-account-activations h5 {
-				margin: 0 0 10px;
+			.dropkey-account-activations h5,
+			.dropkey-account-activate-heading h5 {
+				margin: 0 0 8px;
 				font-size: 13px;
 			}
 
@@ -1070,6 +1722,147 @@ final class CustomerAccount {
 				max-width: 100%;
 				overflow-wrap: anywhere;
 				font-size: 13px;
+			}
+
+			.dropkey-account-activate {
+				margin-top: 22px;
+				padding-top: 20px;
+				border-top: 1px solid #f0f0f1;
+			}
+
+			.dropkey-account-activate-heading p {
+				margin: 0 0 14px;
+				color: #646970;
+				font-size: 13px;
+				line-height: 1.5;
+			}
+
+			.dropkey-account-form-row {
+				display: flex;
+				align-items: flex-end;
+				gap: 10px;
+			}
+
+			.dropkey-account-form-row label {
+				flex: 1 1 auto;
+			}
+
+			.dropkey-account-form-row label > span {
+				display: block;
+				margin-bottom: 6px;
+				color: #50575e;
+				font-size: 12px;
+				font-weight: 600;
+			}
+
+			.dropkey-account-form-row input {
+				display: block;
+				width: 100%;
+				min-height: 42px;
+				padding: 9px 11px;
+				border: 1px solid #8c8f94;
+				border-radius: 6px;
+				background: #fff;
+				color: #1d2327;
+				font-size: 14px;
+				box-shadow: inset 0 1px 2px rgba(0, 0, 0, .05);
+			}
+
+			.dropkey-account-form-row input:focus {
+				border-color: #2271b1;
+				outline: 2px solid rgba(34, 113, 177, .15);
+				outline-offset: 0;
+			}
+
+			.dropkey-account-button,
+			.dropkey-account-copy-button {
+				min-height: 42px;
+				padding: 9px 15px;
+				border: 1px solid #2271b1;
+				border-radius: 6px;
+				background: #2271b1;
+				color: #fff;
+				font-size: 13px;
+				font-weight: 600;
+				line-height: 1.3;
+				cursor: pointer;
+				white-space: nowrap;
+			}
+
+			.dropkey-account-button:hover,
+			.dropkey-account-copy-button:hover {
+				background: #135e96;
+				border-color: #135e96;
+			}
+
+			.dropkey-account-button:disabled {
+				opacity: .65;
+				cursor: wait;
+			}
+
+			.dropkey-account-form-message {
+				margin-top: 10px;
+				padding: 10px 12px;
+				border-radius: 7px;
+				font-size: 13px;
+				line-height: 1.5;
+			}
+
+			.dropkey-account-form-message.is-success {
+				background: #edfaef;
+				color: #18752a;
+			}
+
+			.dropkey-account-form-message.is-error {
+				background: #fcf0f1;
+				color: #b32d2e;
+			}
+
+			.dropkey-account-token-result {
+				margin-top: 18px;
+				padding: 16px;
+				border: 1px solid #c3e6cb;
+				border-radius: 9px;
+				background: #f0fff4;
+			}
+
+			.dropkey-account-token-result-heading strong,
+			.dropkey-account-token-result-heading span {
+				display: block;
+			}
+
+			.dropkey-account-token-result-heading strong {
+				margin-bottom: 4px;
+				color: #18752a;
+				font-size: 14px;
+			}
+
+			.dropkey-account-token-result-heading span {
+				color: #50575e;
+				font-size: 12px;
+			}
+
+			.dropkey-account-token-row {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				margin-top: 12px;
+			}
+
+			.dropkey-account-token-row code {
+				flex: 1 1 auto;
+				min-width: 0;
+				padding: 10px 12px;
+				border: 1px solid #dcdcde;
+				border-radius: 6px;
+				background: #fff;
+				color: #1d2327;
+				font-size: 12px;
+				overflow-wrap: anywhere;
+			}
+
+			.dropkey-account-copy-button {
+				flex: 0 0 auto;
 			}
 
 			.dropkey-account-empty,
@@ -1114,6 +1907,16 @@ final class CustomerAccount {
 				.dropkey-account-card-header,
 				.dropkey-account-activation {
 					align-items: flex-start;
+					flex-direction: column;
+				}
+
+				.dropkey-account-form-row {
+					align-items: stretch;
+					flex-direction: column;
+				}
+
+				.dropkey-account-token-row {
+					align-items: stretch;
 					flex-direction: column;
 				}
 			}
