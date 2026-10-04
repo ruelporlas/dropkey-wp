@@ -14,6 +14,7 @@ use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
+use DropKeyWP\Database\Installer;
 use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\GatewayEventRepository;
@@ -74,16 +75,22 @@ final class Plugin {
 
 		$this->booted = true;
 
+		/*
+		 * Ensure the current database schema is installed before any
+		 * repositories attempt to use it.
+		 */
+		Installer::install();
+
 		global $wpdb;
 
-		$activation_repository        = new ActivationRepository( $wpdb );
-		$customer_repository          = new CustomerRepository( $wpdb );
-		$gateway_event_repository    = new GatewayEventRepository( $wpdb );
-		$license_repository           = new LicenseRepository( $wpdb );
-		$plan_repository              = new PlanRepository( $wpdb );
-		$product_repository           = new ProductRepository( $wpdb );
+		$activation_repository         = new ActivationRepository( $wpdb );
+		$customer_repository           = new CustomerRepository( $wpdb );
+		$gateway_event_repository     = new GatewayEventRepository( $wpdb );
+		$license_repository            = new LicenseRepository( $wpdb );
+		$plan_repository               = new PlanRepository( $wpdb );
+		$product_repository            = new ProductRepository( $wpdb );
 		$subscription_event_repository = new SubscriptionEventRepository( $wpdb );
-		$subscription_repository      = new SubscriptionRepository( $wpdb );
+		$subscription_repository       = new SubscriptionRepository( $wpdb );
 
 		/*
 		 * Payment gateways register themselves through GatewayManager.
