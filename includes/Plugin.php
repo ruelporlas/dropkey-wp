@@ -19,6 +19,7 @@ use DropKeyWP\Application\CreateSubscriptionCheckout;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
 use DropKeyWP\Application\SynchronizeSubscriptionEntitlement;
+use DropKeyWP\Database\Installer;
 use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\GatewayEventRepository;
@@ -79,6 +80,12 @@ final class Plugin {
 		}
 
 		$this->booted = true;
+
+		/*
+		 * Ensure database migrations are applied before any repository
+		 * attempts to read or write the plugin tables.
+		 */
+		Installer::install();
 
 		global $wpdb;
 
