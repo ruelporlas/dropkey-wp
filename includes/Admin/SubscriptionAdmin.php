@@ -1544,24 +1544,29 @@ final class SubscriptionAdmin {
 			}
 
 			.dropkey-wp-lifecycle-table {
+				width: 100%;
 				border: 0;
 				box-shadow: none;
+				table-layout: fixed;
 			}
 
 			.dropkey-wp-lifecycle-table td {
-				padding: 8px 10px;
+				padding: 8px 12px;
 				vertical-align: top;
 			}
 
 			.dropkey-wp-lifecycle-table td:first-child {
-				width: 38%;
+				width: 42%;
 				font-weight: 600;
 				white-space: nowrap;
 			}
 
 			.dropkey-wp-lifecycle-table td:last-child {
+				width: 58%;
 				text-align: right;
 				color: #50575e;
+				overflow-wrap: anywhere;
+				word-break: break-word;
 			}
 
 			@media screen and (max-width: 960px) {
@@ -1780,4 +1785,3 @@ final class SubscriptionAdmin {
 		}
 	}
 }
-
