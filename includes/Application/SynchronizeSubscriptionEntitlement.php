@@ -64,13 +64,21 @@ final class SynchronizeSubscriptionEntitlement {
 		 * an empty value.
 		 */
 		if ( '' === $expires_at || null === $expires_at ) {
-			return new \WP_Error(
+			$error = new \WP_Error(
 				'dropkey_license_expiry_missing',
 				__(
 					'The subscription billing period end is required to synchronize the license entitlement.',
 					'dropkey-wp'
 				)
 			);
+
+			$this->handle_sync_error(
+				$subscription,
+				$license,
+				$error
+			);
+
+			return $error;
 		}
 
 		/*
@@ -93,6 +101,12 @@ final class SynchronizeSubscriptionEntitlement {
 		);
 
 		if ( is_wp_error( $updated ) ) {
+			$this->handle_sync_error(
+				$subscription,
+				$license,
+				$updated
+			);
+
 			return $updated;
 		}
 
@@ -102,12 +116,64 @@ final class SynchronizeSubscriptionEntitlement {
 		 * expiry must not be treated as a new license activation.
 		 */
 		if ( $license->get_status() !== $updated->get_status() ) {
-			$this->fire_status_action(
-				$updated
-			);
+			$this->fire_status_action( $updated );
 		}
 
+		/**
+		 * Fires after a subscription entitlement has been synchronized.
+		 *
+		 * @param License      $updated_subscription_license Updated license.
+		 * @param Subscription $subscription                 Subscription.
+		 */
+		do_action(
+			'dropkey_wp_subscription_entitlement_synchronized',
+			$updated,
+			$subscription
+		);
+
 		return $updated;
+	}
+
+	/**
+	 * Handle an entitlement synchronization failure.
+	 *
+	 * Synchronization runs from lifecycle actions in some cases, where
+	 * a WP_Error return value cannot be consumed by the caller. Logging
+	 * and a dedicated action preserve observability without reversing
+	 * the already-successful subscription status change.
+	 *
+	 * @param Subscription $subscription Subscription.
+	 * @param License      $license      Existing license.
+	 * @param \WP_Error    $error        Synchronization error.
+	 * @return void
+	 */
+	private function handle_sync_error(
+		Subscription $subscription,
+		License $license,
+		\WP_Error $error
+	) {
+		error_log(
+			sprintf(
+				'DropKey WP: Failed to synchronize license entitlement for subscription #%d and license #%d: %s',
+				absint( $subscription->get_id() ),
+				absint( $license->get_id() ),
+				$error->get_error_message()
+			)
+		);
+
+		/**
+		 * Fires when subscription entitlement synchronization fails.
+		 *
+		 * @param \WP_Error    $error        Synchronization error.
+		 * @param Subscription $subscription Subscription.
+		 * @param License      $license      Existing license.
+		 */
+		do_action(
+			'dropkey_wp_subscription_entitlement_sync_failed',
+			$error,
+			$subscription,
+			$license
+		);
 	}
 
 	/**

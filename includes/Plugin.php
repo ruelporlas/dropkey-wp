@@ -14,6 +14,7 @@ use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
+use DropKeyWP\Application\SynchronizeSubscriptionEntitlement;
 use DropKeyWP\Database\Installer;
 use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
@@ -96,6 +97,57 @@ final class Plugin {
 		 * Payment gateways register themselves through GatewayManager.
 		 */
 		$gateway_manager = new GatewayManager();
+
+		/*
+		 * Synchronize subscription lifecycle state with its license
+		 * entitlement.
+		 *
+		 * This remains a separate application service. Subscription
+		 * lifecycle services publish their normal lifecycle actions,
+		 * and this service reacts to those actions.
+		 */
+		$synchronize_subscription_entitlement =
+			new SynchronizeSubscriptionEntitlement(
+				$license_repository
+			);
+
+		/*
+		 * Subscription lifecycle entitlement synchronization.
+		 *
+		 * The synchronization service intentionally handles the
+		 * subscription-to-license mapping and license actions.
+		 */
+		add_action(
+			'dropkey_wp_subscription_activated',
+			array(
+				$synchronize_subscription_entitlement,
+				'execute',
+			)
+		);
+
+		add_action(
+			'dropkey_wp_subscription_past_due',
+			array(
+				$synchronize_subscription_entitlement,
+				'execute',
+			)
+		);
+
+		add_action(
+			'dropkey_wp_subscription_suspended',
+			array(
+				$synchronize_subscription_entitlement,
+				'execute',
+			)
+		);
+
+		add_action(
+			'dropkey_wp_subscription_expired',
+			array(
+				$synchronize_subscription_entitlement,
+				'execute',
+			)
+		);
 
 		/*
 		 * Payment event processing.

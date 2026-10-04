@@ -16,6 +16,8 @@ final class ActivateSubscription {
 
 	private $subscriptions;
 
+	private $change_status;
+
 	/**
 	 * Constructor.
 	 *
@@ -23,6 +25,9 @@ final class ActivateSubscription {
 	 */
 	public function __construct( SubscriptionRepository $subscriptions ) {
 		$this->subscriptions = $subscriptions;
+		$this->change_status = new ChangeSubscriptionStatus(
+			$subscriptions
+		);
 	}
 
 	/**
@@ -63,33 +68,21 @@ final class ActivateSubscription {
 		if ( Subscription::STATUS_PENDING !== $subscription->get_status() ) {
 			return new \WP_Error(
 				'dropkey_subscription_activation_not_allowed',
-				__( 'This subscription cannot be activated from its current status.', 'dropkey-wp' )
+				__(
+					'This subscription cannot be activated from its current status.',
+					'dropkey-wp'
+				)
 			);
 		}
 
-		$updated = $this->subscriptions->update_status(
+		/*
+		 * Route activation through the central lifecycle service so
+		 * validation, lifecycle hooks, and audit logging all use the
+		 * same application boundary.
+		 */
+		return $this->change_status->execute(
 			$subscription_id,
 			Subscription::STATUS_ACTIVE
 		);
-
-		if ( is_wp_error( $updated ) ) {
-			return $updated;
-		}
-
-		$activated_subscription = $this->subscriptions->find( $subscription_id );
-
-		if ( ! $activated_subscription ) {
-			return new \WP_Error(
-				'dropkey_subscription_activation_reload_failed',
-				__( 'The activated subscription could not be reloaded.', 'dropkey-wp' )
-			);
-		}
-
-		do_action(
-			'dropkey_wp_subscription_activated',
-			$activated_subscription
-		);
-
-		return $activated_subscription;
 	}
 }
