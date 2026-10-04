@@ -148,6 +148,7 @@ Database:
 - repositories/LicenseRepository.php
 - repositories/PlanRepository.php
 - repositories/ProductRepository.php
+- repositories/SubscriptionEventRepository.php
 - repositories/SubscriptionRepository.php
 
 Domain:
@@ -274,10 +275,6 @@ USER-CONFIRMED STATUS:
 - The previously discussed sidebar styling work is considered complete.
 - Do not treat the Subscription Details page as the active unfinished UI task.
 
-User explicitly established:
-- The last-known-working SubscriptionAdmin.php is the source of truth for the current subscription admin implementation.
-- When styling work is requested, preserve the constructor, methods, hooks, repository calls, routes, forms, and HTML structure unless the user explicitly asks for functional changes.
-
 Previously completed styling work included:
 - subscription detail sidebar postbox headers
 - Lifecycle table
@@ -342,31 +339,47 @@ Therefore, the project is currently in an IMPLEMENTATION + INTEGRATION VERIFICAT
 As of 2026-10-04:
 
 CURRENT WORK AREA:
-Subscription admin UI / next subscription-admin work.
+Webhook/payment-event reliability hardening and verification.
 
-COMPLETED:
-- Subscription Details page — DONE.
-- Sidebar postbox header styling — DONE.
-- Lifecycle table styling — DONE.
-- IDs table styling — DONE.
-- Header title spacing/padding — DONE.
-- Sidebar table column spacing — DONE.
+CONFIRMED CURRENT SOURCE INSPECTION:
+- GatewayEventRepository currently has an atomic received→processing claim.
+- Current claim does not yet recover stale processing records.
+- Current ProcessPaymentEvent already performs payload-hash integrity checks and uses the stored payload for processing.
+- Current ProcessPaymentEvent returns a WP_Error for a concurrently processing event, which may cause an unnecessary provider retry depending on WebhookController behavior.
+- Current ProcessPaymentEvent does NOT yet reconcile PayPal webhook state against the current PayPal subscription resource.
+- Current Plugin.php does NOT yet pass a shared GatewayManager into ProcessPaymentEvent.
+- Current Schema.php remains VERSION 3 and has no additional webhook-ordering fields.
+- No code changes from the latest webhook-hardening proposal have been applied to repository files.
 
-CURRENT GITHUB ACCESS:
-Only my_memory.txt is writable. All other files are read-only.
-
-CURRENT PROJECT STATE:
-Core implementation exists and has passed meaningful PayPal/subscription integration testing. Subscription Details UI is complete. The next Subscription UI task has not yet been selected in this checkpoint and must come from the user's explicit direction.
+CURRENT DESIGN DIRECTION (PROPOSED / NOT YET DEPLOYED):
+- Keep GitHub code files read-only.
+- Improve webhook reliability as a subsystem rather than only adding a processing lock.
+- Preserve payload integrity/idempotency.
+- Keep atomic event claiming.
+- Treat a concurrently processing duplicate as safely acknowledged rather than generating an unnecessary provider retry.
+- Recover stale processing events after a safety timeout.
+- For PayPal subscription events, reconcile against PayPal's current subscription resource to reduce out-of-order webhook state regressions.
+- Preserve existing lifecycle/audit architecture.
+- Preserve renewal behavior, including active subscriptions whose billing period changes without a status change.
+- Avoid unnecessary database schema changes unless later verification demonstrates they are required.
+- Avoid unnecessary PayPal API calls outside webhook reconciliation.
+- No GitHub writes except this my_memory.txt file.
 
 IMPORTANT:
-Do not automatically jump into the broader audit/hardening plan or assume a particular next screen without the user's instruction.
+The above design direction is NOT a confirmed deployed implementation. Do not claim these changes are active until the user applies the replacement files locally and testing confirms them.
 
 ==================================================
 15. NEXT WORK — PLANNED, NOT YET COMPLETED
 ==================================================
-A broader verification/hardening pass remains a logical future project phase.
+Immediate planned work:
+1. Finish reviewing the actual WebhookController contract against the new ProcessPaymentEvent behavior.
+2. Validate the proposed ProcessPaymentEvent/GatewayEventRepository changes against the actual PayPalGateway get_subscription() response shape.
+3. Provide complete replacement files only; do not write repository code files.
+4. User applies the replacements locally.
+5. Test duplicate, concurrent, failed/retry, stale-processing, renewal, payment-failure, suspension, cancellation, and expiration scenarios.
+6. Only after successful testing mark the webhook-hardening implementation as CONFIRMED.
 
-Potential verification sequence:
+Broader verification sequence remains a future phase:
 1. Domain → Application → Repository flow.
 2. Application → REST/Admin integration.
 3. Subscription lifecycle/state transitions.
@@ -386,9 +399,6 @@ Potential verification sequence:
 17. Gateway mapping consistency.
 
 These are REVIEW TARGETS, not known bugs.
-Do not state that they are broken or complete until actual code/testing establishes that.
-
-Subscription UI next steps are currently UNKNOWN until the user selects or asks for the next area. Do not infer a screen or feature from the list above.
 
 ==================================================
 16. CONFIRMED VS UNKNOWN
@@ -410,13 +420,17 @@ CONFIRMED:
 - Header title spacing/padding is DONE.
 - Sidebar table column spacing is DONE.
 - Last-known-working SubscriptionAdmin.php remains the source of truth for preserving functional behavior during styling work.
+- Current webhook event table has a unique (gateway,event_id) constraint.
+- Current GatewayEventRepository has an atomic received→processing claim.
+- Current ProcessPaymentEvent verifies payload hashes before processing.
+- Latest webhook-hardening code proposals have NOT been deployed to repository code files.
 
 UNKNOWN / MUST VERIFY:
 - Exact implementation details not recorded in this file.
-- Exact contents of any repository file at the current moment.
-- What the next Subscription UI screen/feature should be until explicitly requested.
-- Whether every lifecycle transition is correct.
-- Whether webhook handling is fully idempotent across all event types.
+- Exact current WebhookController behavior/response mapping at the moment a replacement is applied.
+- Exact PayPal get_subscription() response behavior across all relevant subscription states.
+- Whether the proposed remote-state reconciliation should run for every PayPal subscription webhook or only selected event types.
+- Whether all webhook edge cases are correct after local testing.
 - Whether all security/capability/nonce concerns are fully satisfied.
 - Production PayPal readiness.
 - Any feature not explicitly confirmed above.
@@ -487,8 +501,6 @@ DropKey WP is an existing WordPress subscription/licensing plugin with a layered
 
 The Subscription Details admin page is DONE. Its sidebar postbox headers, Lifecycle table, IDs table, header spacing, and sidebar table column spacing were all explicitly confirmed complete by the user.
 
-The immediate Subscription UI next step has not been selected yet. Do not guess it.
-
-GitHub rule: ONLY my_memory.txt may be written. All other repository files are READ-ONLY.
+The current engineering focus is webhook/payment-event reliability hardening. The proposed changes are NOT yet deployed. GitHub code files must remain read-only; only my_memory.txt may be updated by the assistant.
 
 END OF RECOVERY FILE
