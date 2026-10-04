@@ -60,6 +60,44 @@ final class CustomerRepository {
 	}
 
 	/**
+	 * Get all customers.
+	 *
+	 * @param string $status Optional customer status.
+	 * @return Customer[]
+	 */
+	public function all( $status = '' ) {
+		if ( '' !== $status ) {
+			$rows = $this->wpdb->get_results(
+				$this->wpdb->prepare(
+					"SELECT * FROM {$this->table}
+					WHERE status = %s
+					ORDER BY id DESC",
+					$status
+				),
+				ARRAY_A
+			);
+		} else {
+			$rows = $this->wpdb->get_results(
+				"SELECT * FROM {$this->table}
+				ORDER BY id DESC",
+				ARRAY_A
+			);
+		}
+
+		if ( ! is_array( $rows ) ) {
+			return array();
+		}
+
+		$customers = array();
+
+		foreach ( $rows as $row ) {
+			$customers[] = new Customer( $row );
+		}
+
+		return $customers;
+	}
+
+	/**
 	 * Find a customer by WordPress user ID.
 	 *
 	 * @param int $user_id WordPress user ID.

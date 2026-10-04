@@ -7,6 +7,7 @@
 
 namespace DropKeyWP;
 
+use DropKeyWP\Admin\CustomerAdmin;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
@@ -60,7 +61,7 @@ final class Plugin {
 
 		$activation_repository         = new ActivationRepository( $wpdb );
 		$customer_repository           = new CustomerRepository( $wpdb );
-		$gateway_event_repository     = new GatewayEventRepository( $wpdb );
+		$gateway_event_repository      = new GatewayEventRepository( $wpdb );
 		$license_repository            = new LicenseRepository( $wpdb );
 		$plan_repository               = new PlanRepository( $wpdb );
 		$product_repository            = new ProductRepository( $wpdb );
@@ -202,6 +203,12 @@ final class Plugin {
 			);
 
 			$product_admin->register();
+
+			$customer_admin = new CustomerAdmin(
+				$customer_repository
+			);
+
+			$customer_admin->register();
 
 			$subscription_admin = new SubscriptionAdmin(
 				$subscription_repository,
