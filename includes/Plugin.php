@@ -149,14 +149,13 @@ final class Plugin {
 		);
 
 		$synchronize_subscription_entitlement = new SynchronizeSubscriptionEntitlement(
-			$subscription_repository,
 			$license_repository
 		);
 
 		$process_payment_event = new ProcessPaymentEvent(
+			$gateway_event_repository,
 			$subscription_repository,
-			$license_repository,
-			$synchronize_subscription_entitlement
+			$license_repository
 		);
 
 		$enforce_past_due_subscriptions = new EnforcePastDueSubscriptions(
@@ -165,11 +164,11 @@ final class Plugin {
 		);
 
 		$create_subscription_checkout = new CreateSubscriptionCheckout(
+			$gateway_manager,
 			$customer_repository,
 			$product_repository,
 			$plan_repository,
-			$subscription_repository,
-			$gateway_manager
+			$subscription_repository
 		);
 
 		$checkout_controller = new CheckoutController(
@@ -245,3 +244,4 @@ final class Plugin {
 		}
 	}
 }
+
