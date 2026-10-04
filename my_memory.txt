@@ -1,0 +1,217 @@
+DROPKEY WP — PROJECT MEMORY / RECOVERY FILE
+Last updated: 2026-10-04
+
+PURPOSE
+This file is the persistent recovery/reference point for the DropKey WP project. Read this file first whenever project context is needed, especially after a context reset or when there is risk of making assumptions. It is intentionally written as a compact source of project decisions, rules, current progress, and next-step state.
+
+CRITICAL GITHUB ACCESS RULE
+Repository: ruelporlas/dropkey-wp
+Branch: main
+
+ONLY THIS FILE MAY BE WRITTEN:
+- my_memory.txt
+
+my_memory.txt is the ONLY GitHub file that may be created, modified, or replaced by the assistant without asking again.
+
+ALL OTHER REPOSITORY FILES:
+- Read-only / do not modify.
+- Do not create, delete, overwrite, commit, or otherwise change them.
+- They may be inspected only when the user asks for work that requires understanding existing implementation.
+- Never assume implementation from memory when the actual repository code can establish the truth.
+
+IMPORTANT WORKING RULES
+1. GitHub repository code is the implementation source of truth.
+2. Existing code beats old conversation assumptions unless the user explicitly overrides it.
+3. Do not hallucinate files, classes, methods, routes, database fields, or completed features.
+4. Inspect actual repository code before making implementation claims.
+5. Do not get ahead of the user's requested task.
+6. When changing code, the user's preference is complete replacement files with exact paths, not small manual patches. HOWEVER, under the current GitHub rule the assistant cannot write those code files directly; only my_memory.txt is writable.
+7. Keep architecture clean, WordPress-standard, secure, extensible, and hook-friendly.
+8. This file is a recovery aid, not a substitute for inspecting actual code when implementation details matter.
+
+PRODUCT
+Name: DropKey WP
+Type: WordPress plugin for digital product subscriptions and licensing.
+Core direction: clean WordPress-standard implementation with action/filter hooks and an extensible architecture.
+
+KNOWN ARCHITECTURE / REPOSITORY STATE
+The repository had a substantial implementation already present when last inspected. The known structure included:
+
+Root:
+- dropkey-wp.php
+- dropkey-audit.txt
+- New Text Document.txt
+- .gitignore
+- my_memory.txt
+
+Admin:
+- includes/Admin/PlanAdmin.php
+- includes/Admin/ProductAdmin.php
+- includes/Admin/SubscriptionAdmin.php
+- includes/Admin/TestConsole.php
+
+Application:
+- ActivateLicense.php
+- ActivateSubscription.php
+- AuthenticateActivation.php
+- ChangePlanStatus.php
+- ChangeProductStatus.php
+- ChangeSubscriptionStatus.php
+- CreateCustomer.php
+- CreateLicense.php
+- CreatePlan.php
+- CreateProduct.php
+- CreateSubscription.php
+- CreateSubscriptionCheckout.php
+- DeactivateLicense.php
+- EnforcePastDueSubscriptions.php
+- ProcessPaymentEvent.php
+- SynchronizeSubscriptionEntitlement.php
+- UpdatePlan.php
+- UpdateProduct.php
+- ValidateLicense.php
+
+Database:
+- Installer.php
+- Schema.php
+- repositories/ActivationRepository.php
+- repositories/CustomerRepository.php
+- repositories/GatewayEventRepository.php
+- repositories/GatewayMappingRepository.php
+- repositories/LicenseRepository.php
+- repositories/PlanRepository.php
+- repositories/ProductRepository.php
+- repositories/SubscriptionRepository.php
+
+Domain:
+- Activation.php
+- BillingInterval.php
+- Customer.php
+- GatewayEvent.php
+- GatewayMapping.php
+- License.php
+- Plan.php
+- PlanStatus.php
+- Product.php
+- ProductStatus.php
+- ProductType.php
+- Subscription.php
+
+Frontend:
+- ProductCheckout.php
+
+Gateways:
+- Contracts/PaymentGatewayInterface.php
+- GatewayManager.php
+- PayPal/PayPalGateway.php
+- PayPal/PayPalSettings.php
+
+Core:
+- Plugin.php
+
+REST:
+- CheckoutController.php
+- LicenseController.php
+- WebhookController.php
+
+ARCHITECTURAL MODEL
+Known high-level flow:
+WordPress plugin bootstrap
+→ Core Plugin
+→ Application use cases
+→ Domain entities/value concepts
+→ Repository/database persistence
+→ REST / frontend / admin interfaces
+→ Payment Gateway abstraction
+→ PayPal implementation
+→ Subscription entitlement synchronization
+→ License activation/validation/deactivation
+
+KNOWN APPLICATION RESPONSIBILITIES
+The application layer contains use cases for:
+- products
+- plans
+- customers
+- subscriptions
+- subscription checkout
+- subscription status
+- payment events
+- entitlement synchronization
+- licenses
+- license activation/authentication/validation/deactivation
+- past-due subscription enforcement
+
+KNOWN ADMIN SURFACES
+Admin classes exist for:
+- plans
+- products
+- subscriptions
+- test console
+
+KNOWN GATEWAY DIRECTION
+Payment gateways are abstracted through PaymentGatewayInterface and GatewayManager.
+PayPal is the currently known concrete gateway.
+Do not assume additional gateways exist unless actual repository inspection confirms them.
+
+KNOWN DATABASE DIRECTION
+Repositories exist for:
+- customers
+- products/plans
+- subscriptions
+- licenses
+- activations
+- gateway events
+- gateway mappings
+Schema and installation are centralized in Database/Schema.php and Database/Installer.php.
+
+CURRENT PROJECT PHASE / PROGRESS
+The project is beyond initial architecture and already has a broad implementation across domain, application, persistence, REST, admin, frontend, and PayPal gateway areas.
+
+The next meaningful project activity identified before this file was created was NOT blind feature expansion. The recommended direction was an audit/verification/hardening pass across the existing implementation.
+
+AUDIT / VERIFICATION AREAS TO REVIEW
+When the user asks to continue project work, the likely verification sequence is:
+1. Domain → Application → Repository flow.
+2. Application → REST/Admin integration.
+3. Subscription lifecycle and state transitions.
+4. Entitlement synchronization.
+5. License creation, activation, authentication, validation, and deactivation.
+6. Payment/webhook processing and idempotency.
+7. Past-due subscription handling.
+8. Authorization and WordPress capabilities/nonces.
+9. Database consistency and error handling.
+10. Security and input validation/sanitization/escaping.
+11. WordPress coding standards.
+12. Action/filter hook and extensibility quality.
+13. Agreement between admin UI, application use cases, and persisted state.
+14. Edge cases around repeated events, repeated activation/deactivation, expired/voided/inactive states, and inconsistent gateway mappings.
+
+IMPORTANT: These are REVIEW TARGETS, not claims that the above areas are currently broken or complete. Actual files must establish the facts.
+
+USER EXPECTATIONS
+- User wants the assistant to act as a capable project pilot and make reasonable architectural decisions when the direction is clear.
+- At the same time, the assistant must not get ahead of the explicitly requested phase/task.
+- User strongly dislikes hallucination or claims based on assumed implementation.
+- If uncertain, inspect the allowed repository content when appropriate, or state the uncertainty.
+- Prefer clean, optimized solutions and avoid unnecessary dependencies.
+- Preserve existing architecture unless there is a demonstrated reason to change it.
+
+RECOVERY PROTOCOL
+If context is lost:
+1. Read my_memory.txt first.
+2. Treat the CRITICAL GITHUB ACCESS RULE as binding.
+3. Do not write any repository file other than my_memory.txt.
+4. Use the memory above to reconstruct project direction and known progress.
+5. For implementation questions, inspect actual repository files as needed, but never modify them under the current rule.
+6. Distinguish clearly between:
+   - CONFIRMED: established by actual repository inspection or explicit user decision.
+   - PROJECT DIRECTION: agreed/intended architecture.
+   - REVIEW TARGET: something that still needs verification.
+   - UNKNOWN: do not guess.
+7. Before major project milestones, update this file with the current state so it remains useful as a recovery point.
+
+MEMORY MAINTENANCE RULE
+Whenever the assistant is explicitly asked to record/update project progress, or after a significant confirmed project decision/milestone, update this file. Keep entries factual and concise enough to scan quickly. Never use this file to invent implementation details.
+
+CURRENT CONFIRMED SPECIAL RULE
+The user explicitly authorized the assistant to freely read and write my_memory.txt without asking for permission each time. This permission applies ONLY to my_memory.txt.
