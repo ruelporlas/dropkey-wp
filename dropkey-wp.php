@@ -45,7 +45,7 @@ define( 'DROPKEY_WP_URL', plugin_dir_url( __FILE__ ) );
  */
 function dropkey_wp_autoload( $class ) {
 	$prefix   = 'DropKeyWP\\';
-	$base_dir = DROPKEY_WP_DIR . 'includes/';
+	$base_dir = __DIR__ . '/includes/';
 
 	if ( 0 !== strpos( $class, $prefix ) ) {
 		return;
@@ -60,6 +60,11 @@ function dropkey_wp_autoload( $class ) {
 }
 
 spl_autoload_register( 'dropkey_wp_autoload' );
+
+/*
+ * Load the main plugin class explicitly.
+ */
+require_once __DIR__ . '/includes/Plugin.php';
 
 /**
  * Install the database when the plugin is activated.
