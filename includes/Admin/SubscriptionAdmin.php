@@ -194,8 +194,11 @@ final class SubscriptionAdmin {
 
 			<hr class="wp-header-end" />
 
-			<?php $this->render_status_filters( $status, $gateway ); ?>
-			<?php $this->render_gateway_filter( $status, $gateway, $gateways ); ?>
+			<div class="dropkey-wp-subscription-toolbar">
+				<?php $this->render_status_filters( $status, $gateway ); ?>
+				<?php $this->render_gateway_filter( $status, $gateway, $gateways ); ?>
+			</div>
+
 			<?php $this->render_admin_notice(); ?>
 
 			<?php if ( empty( $subscriptions ) ) : ?>
@@ -213,31 +216,28 @@ final class SubscriptionAdmin {
 
 						<thead>
 							<tr>
-								<th scope="col" class="column-id">
+								<th scope="col" class="column-subscription">
 									<?php echo esc_html__( 'ID', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-customer">
 									<?php echo esc_html__( 'Customer', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-product">
 									<?php echo esc_html__( 'Product', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-plan">
 									<?php echo esc_html__( 'Plan', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-gateway">
 									<?php echo esc_html__( 'Gateway', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
-									<?php echo esc_html__( 'Gateway Subscription ID', 'dropkey-wp' ); ?>
-								</th>
-								<th scope="col">
+								<th scope="col" class="column-status">
 									<?php echo esc_html__( 'Status', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-period">
 									<?php echo esc_html__( 'Current Period', 'dropkey-wp' ); ?>
 								</th>
-								<th scope="col">
+								<th scope="col" class="column-created">
 									<?php echo esc_html__( 'Created', 'dropkey-wp' ); ?>
 								</th>
 							</tr>
@@ -268,31 +268,54 @@ final class SubscriptionAdmin {
 									),
 									admin_url( 'admin.php' )
 								);
+
+								$gateway_subscription_id = $subscription->get_gateway_subscription_id();
+
+								$period_start = $subscription->get_current_period_start();
+								$period_end   = $subscription->get_current_period_end();
 								?>
 
 								<tr>
 
-									<td>
-										<strong>
+									<td class="column-subscription">
+										<strong class="row-title">
 											<a href="<?php echo esc_url( $detail_url ); ?>">
-												#<?php echo esc_html( $subscription->get_id() ); ?>
+												<?php
+												printf(
+													esc_html__( '#%d', 'dropkey-wp' ),
+													(int) $subscription->get_id()
+												);
+												?>
 											</a>
 										</strong>
 									</td>
 
-									<td>
+									<td class="column-customer">
 										<?php if ( $customer ) : ?>
+
 											<strong class="row-title">
 												<?php echo esc_html( $this->get_customer_name( $customer ) ); ?>
 											</strong>
-											<br />
-											<span class="description">
+
+											<span class="dropkey-wp-secondary-text">
 												<?php echo esc_html( $customer->get_email() ); ?>
 											</span>
+
+											<div class="row-actions">
+												<span class="view">
+													<a href="<?php echo esc_url( $detail_url ); ?>">
+														<?php echo esc_html__( 'View', 'dropkey-wp' ); ?>
+													</a>
+												</span>
+											</div>
+
 										<?php else : ?>
-											<strong><?php echo esc_html__( 'Customer not found', 'dropkey-wp' ); ?></strong>
-											<br />
-											<span class="description">
+
+											<strong class="row-title">
+												<?php echo esc_html__( 'Customer not found', 'dropkey-wp' ); ?>
+											</strong>
+
+											<span class="dropkey-wp-secondary-text">
 												<?php
 												printf(
 													esc_html__( 'Customer #%d', 'dropkey-wp' ),
@@ -300,18 +323,36 @@ final class SubscriptionAdmin {
 												);
 												?>
 											</span>
+
+											<div class="row-actions">
+												<span class="view">
+													<a href="<?php echo esc_url( $detail_url ); ?>">
+														<?php echo esc_html__( 'View', 'dropkey-wp' ); ?>
+													</a>
+												</span>
+											</div>
+
 										<?php endif; ?>
 									</td>
 
-									<td>
+									<td class="column-product">
 										<?php if ( $product ) : ?>
-											<strong><?php echo esc_html( $product->get_name() ); ?></strong>
-											<br />
-											<code><?php echo esc_html( $product->get_slug() ); ?></code>
+
+											<strong class="row-title">
+												<?php echo esc_html( $product->get_name() ); ?>
+											</strong>
+
+											<code class="dropkey-wp-product-slug">
+												<?php echo esc_html( $product->get_slug() ); ?>
+											</code>
+
 										<?php else : ?>
-											<strong><?php echo esc_html__( 'Product not found', 'dropkey-wp' ); ?></strong>
-											<br />
-											<span class="description">
+
+											<strong class="row-title">
+												<?php echo esc_html__( 'Product not found', 'dropkey-wp' ); ?>
+											</strong>
+
+											<span class="dropkey-wp-secondary-text">
 												<?php
 												printf(
 													esc_html__( 'Product #%d', 'dropkey-wp' ),
@@ -319,14 +360,18 @@ final class SubscriptionAdmin {
 												);
 												?>
 											</span>
+
 										<?php endif; ?>
 									</td>
 
-									<td>
+									<td class="column-plan">
 										<?php if ( $plan ) : ?>
-											<strong><?php echo esc_html( $plan->get_name() ); ?></strong>
-											<br />
-											<span class="description">
+
+											<strong class="row-title">
+												<?php echo esc_html( $plan->get_name() ); ?>
+											</strong>
+
+											<span class="dropkey-wp-plan-meta">
 												<?php
 												echo esc_html(
 													$this->format_plan_price(
@@ -335,7 +380,7 @@ final class SubscriptionAdmin {
 													)
 												);
 												?>
-												&nbsp;·&nbsp;
+												<span aria-hidden="true">·</span>
 												<?php
 												echo esc_html(
 													$this->format_billing(
@@ -345,10 +390,14 @@ final class SubscriptionAdmin {
 												);
 												?>
 											</span>
+
 										<?php else : ?>
-											<strong><?php echo esc_html__( 'Plan not found', 'dropkey-wp' ); ?></strong>
-											<br />
-											<span class="description">
+
+											<strong class="row-title">
+												<?php echo esc_html__( 'Plan not found', 'dropkey-wp' ); ?>
+											</strong>
+
+											<span class="dropkey-wp-secondary-text">
 												<?php
 												printf(
 													esc_html__( 'Plan #%d', 'dropkey-wp' ),
@@ -356,11 +405,12 @@ final class SubscriptionAdmin {
 												);
 												?>
 											</span>
+
 										<?php endif; ?>
 									</td>
 
-									<td>
-										<strong>
+									<td class="column-gateway">
+										<strong class="row-title">
 											<?php
 											echo esc_html(
 												$this->get_gateway_label(
@@ -369,68 +419,82 @@ final class SubscriptionAdmin {
 											);
 											?>
 										</strong>
-									</td>
 
-									<td>
-										<?php if ( $subscription->get_gateway_subscription_id() ) : ?>
-											<code>
-												<?php echo esc_html( $subscription->get_gateway_subscription_id() ); ?>
-											</code>
-										<?php else : ?>
-											<span class="description">
-												<?php echo esc_html__( 'Not set', 'dropkey-wp' ); ?>
+										<?php if ( $gateway_subscription_id ) : ?>
+
+											<span class="dropkey-wp-secondary-text">
+												<?php echo esc_html__( 'Gateway Subscription ID', 'dropkey-wp' ); ?>
 											</span>
+
+											<code class="dropkey-wp-gateway-id">
+												<?php echo esc_html( $gateway_subscription_id ); ?>
+											</code>
+
+										<?php else : ?>
+
+											<span class="dropkey-wp-secondary-text">
+												<?php echo esc_html__( 'Gateway ID not set', 'dropkey-wp' ); ?>
+											</span>
+
 										<?php endif; ?>
 									</td>
 
-									<td>
+									<td class="column-status">
 										<span class="dropkey-wp-status dropkey-wp-status-<?php echo esc_attr( $subscription->get_status() ); ?>">
 											<?php echo esc_html( $this->get_status_label( $subscription->get_status() ) ); ?>
 										</span>
 
 										<?php if ( $subscription->get_cancel_at_period_end() ) : ?>
-											<br />
-											<span class="description">
+											<span class="dropkey-wp-status-note">
 												<?php echo esc_html__( 'Cancels at period end', 'dropkey-wp' ); ?>
 											</span>
 										<?php endif; ?>
 									</td>
 
-									<td>
-										<?php
-										$period_start = $subscription->get_current_period_start();
-										$period_end   = $subscription->get_current_period_end();
-										?>
-
+									<td class="column-period">
 										<?php if ( $period_start || $period_end ) : ?>
+
 											<div class="dropkey-wp-period">
+
 												<?php if ( $period_start ) : ?>
-													<div>
+													<div class="dropkey-wp-period-row">
 														<span class="description">
 															<?php echo esc_html__( 'Starts', 'dropkey-wp' ); ?>
 														</span>
-														<strong><?php echo esc_html( $this->format_datetime( $period_start ) ); ?></strong>
+
+														<strong>
+															<?php echo esc_html( $this->format_datetime( $period_start ) ); ?>
+														</strong>
 													</div>
 												<?php endif; ?>
 
 												<?php if ( $period_end ) : ?>
-													<div>
+													<div class="dropkey-wp-period-row">
 														<span class="description">
 															<?php echo esc_html__( 'Ends', 'dropkey-wp' ); ?>
 														</span>
-														<strong><?php echo esc_html( $this->format_datetime( $period_end ) ); ?></strong>
+
+														<strong>
+															<?php echo esc_html( $this->format_datetime( $period_end ) ); ?>
+														</strong>
 													</div>
 												<?php endif; ?>
+
 											</div>
+
 										<?php else : ?>
+
 											<span class="description">
 												<?php echo esc_html__( 'Not set', 'dropkey-wp' ); ?>
 											</span>
+
 										<?php endif; ?>
 									</td>
 
-									<td>
-										<?php echo esc_html( $this->format_datetime( $subscription->get_created_at() ) ); ?>
+									<td class="column-created">
+										<span class="dropkey-wp-created-date">
+											<?php echo esc_html( $this->format_datetime( $subscription->get_created_at() ) ); ?>
+										</span>
 									</td>
 
 								</tr>
@@ -1347,13 +1411,26 @@ final class SubscriptionAdmin {
 	private function render_admin_styles() {
 		?>
 		<style>
+			.dropkey-wp-subscription-toolbar {
+				margin-top: 4px;
+			}
+
+			.dropkey-wp-subscription-filter {
+				display: flex;
+				align-items: center;
+				flex-wrap: wrap;
+				gap: 6px;
+				margin: 6px 0 14px;
+			}
+
 			.dropkey-wp-subscriptions-table {
-				overflow-x: auto;
 				margin-top: 12px;
+				overflow-x: auto;
 			}
 
 			.dropkey-wp-subscriptions-table table {
-				min-width: 1280px;
+				width: 100%;
+				table-layout: auto;
 			}
 
 			.dropkey-wp-subscriptions-table th,
@@ -1361,40 +1438,134 @@ final class SubscriptionAdmin {
 				vertical-align: top;
 			}
 
-			.dropkey-wp-subscriptions-table .column-id {
-				width: 60px;
+			.dropkey-wp-subscriptions-table th {
+				white-space: nowrap;
+			}
+
+			.dropkey-wp-subscriptions-table td {
+				padding-top: 12px;
+				padding-bottom: 12px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-subscription {
+				width: 70px;
+				white-space: nowrap;
+			}
+
+			.dropkey-wp-subscriptions-table .column-customer {
+				width: 20%;
+				min-width: 180px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-product {
+				width: 18%;
+				min-width: 150px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-plan {
+				width: 18%;
+				min-width: 150px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-gateway {
+				width: 15%;
+				min-width: 145px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-status {
+				width: 115px;
+				white-space: nowrap;
+			}
+
+			.dropkey-wp-subscriptions-table .column-period {
+				width: 175px;
+				min-width: 165px;
+			}
+
+			.dropkey-wp-subscriptions-table .column-created {
+				width: 135px;
+				white-space: nowrap;
 			}
 
 			.dropkey-wp-subscriptions-table .row-title {
-				display: inline-block;
-				margin-bottom: 2px;
+				display: block;
+				margin-bottom: 3px;
+			}
+
+			.dropkey-wp-subscriptions-table .row-title a {
+				text-decoration: none;
+			}
+
+			.dropkey-wp-subscriptions-table .row-actions {
+				margin-top: 4px;
 			}
 
 			.dropkey-wp-subscriptions-table .description {
 				color: #646970;
 			}
 
-			.dropkey-wp-subscriptions-table code {
+			.dropkey-wp-secondary-text {
+				display: block;
+				margin-top: 2px;
+				color: #646970;
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.dropkey-wp-plan-meta {
+				display: block;
+				margin-top: 3px;
+				color: #646970;
+				font-size: 12px;
+				line-height: 1.45;
+			}
+
+			.dropkey-wp-product-slug {
+				display: inline-block;
+				margin-top: 5px;
+				max-width: 100%;
+				overflow-wrap: anywhere;
 				word-break: break-word;
+			}
+
+			.dropkey-wp-gateway-id {
+				display: block;
+				margin-top: 3px;
+				max-width: 100%;
+				overflow-wrap: anywhere;
+				word-break: break-word;
+				white-space: normal;
+			}
+
+			.dropkey-wp-status-note {
+				display: block;
+				margin-top: 5px;
+				color: #646970;
+				font-size: 12px;
+				line-height: 1.4;
+				white-space: normal;
 			}
 
 			.dropkey-wp-period {
 				display: flex;
 				flex-direction: column;
-				gap: 5px;
+				gap: 6px;
 			}
 
-			.dropkey-wp-period div {
+			.dropkey-wp-period-row {
 				display: flex;
 				flex-direction: column;
 				gap: 1px;
 			}
 
-			.dropkey-wp-subscription-filter {
-				display: flex;
-				align-items: center;
-				gap: 6px;
-				margin: 4px 0 12px;
+			.dropkey-wp-period-row strong {
+				font-size: 12px;
+				font-weight: 500;
+			}
+
+			.dropkey-wp-created-date {
+				display: inline-block;
+				line-height: 1.45;
 			}
 
 			.title-count {
@@ -1569,6 +1740,16 @@ final class SubscriptionAdmin {
 				word-break: break-word;
 			}
 
+			@media screen and (max-width: 1100px) {
+				.dropkey-wp-subscriptions-table {
+					overflow-x: auto;
+				}
+
+				.dropkey-wp-subscriptions-table table {
+					min-width: 1050px;
+				}
+			}
+
 			@media screen and (max-width: 960px) {
 				.dropkey-wp-subscription-detail {
 					grid-template-columns: 1fr;
@@ -1584,6 +1765,10 @@ final class SubscriptionAdmin {
 			}
 
 			@media screen and (max-width: 782px) {
+				.dropkey-wp-subscriptions-table table {
+					min-width: 950px;
+				}
+
 				.dropkey-wp-subscription-detail .form-table th,
 				.dropkey-wp-subscription-detail .form-table td {
 					width: auto;
