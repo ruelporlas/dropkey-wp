@@ -455,32 +455,39 @@ final class ProcessPaymentEvent {
 					)
 				);
 			}
-
-			$entitlement = $this->synchronize_entitlement->execute(
-				$subscription
-			);
-
-			if ( is_wp_error( $entitlement ) ) {
-				return $entitlement;
-			}
 		}
 
-		if ( $subscription->get_status() === $status ) {
-			/*
-			 * A successful renewal can leave the subscription ACTIVE
-			 * while extending its billing period. The period and
-			 * entitlement were therefore synchronized above first.
-			 */
+		/*
+		 * Change the subscription status before synchronizing the
+		 * entitlement. The lifecycle action fired by ChangeSubscriptionStatus
+		 * receives the newly persisted subscription state, ensuring that
+		 * suspended and expired subscriptions correctly update their license.
+		 */
+		if ( $subscription->get_status() !== $status ) {
+			$result = $this->change_status->execute(
+				$subscription->get_id(),
+				$status
+			);
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
 			return true;
 		}
 
-		$result = $this->change_status->execute(
-			$subscription->get_id(),
-			$status
+		/*
+		 * When the status does not change, there is no lifecycle action
+		 * to synchronize the entitlement. This is the normal renewal
+		 * path: the billing period changes while the subscription remains
+		 * ACTIVE, so synchronize the license explicitly.
+		 */
+		$entitlement = $this->synchronize_entitlement->execute(
+			$subscription
 		);
 
-		if ( is_wp_error( $result ) ) {
-			return $result;
+		if ( is_wp_error( $entitlement ) ) {
+			return $entitlement;
 		}
 
 		return true;
@@ -489,7 +496,7 @@ final class ProcessPaymentEvent {
 	/**
 	 * Resolve local status from the provider's current subscription state.
 	 *
-	 * @param string $event_type        Event type.
+	 * @param string $event_type          Event type.
 	 * @param array  $remote_subscription Current provider resource.
 	 * @return string|\WP_Error
 	 */
@@ -672,4 +679,4 @@ final class ProcessPaymentEvent {
 			? $map[ $event_type ]
 			: '';
 	}
-} 
+}
