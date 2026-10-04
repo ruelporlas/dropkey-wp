@@ -1,0 +1,14 @@
+# Local SFTP / deployment configuration
+.vscode/sftp.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# WordPress local configuration
+wp-config.php
+
+# OS / editor files
+.DS_Store
+Thumbs.db

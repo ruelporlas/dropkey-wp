@@ -1,0 +1,1740 @@
+﻿<?php
+/**
+ * DropKey WP gateway manager.
+ *
+ * @package DropKeyWP
+ */
+
+namespace DropKeyWP\Gateways;
+
+use DropKeyWP\Gateways\Contracts\PaymentGatewayInterface;
+use DropKeyWP\Gateways\PayPal\PayPalGateway;
+use DropKeyWP\Gateways\PayPal\PayPalSettings;
+
+defined( 'ABSPATH' ) || exit;
+
+final class GatewayManager {
+
+	/**
+	 * Registered gateway instances.
+	 *
+	 * @var PaymentGatewayInterface[]
+	 */
+	private $gateways = array();
+
+	/**
+	 * Constructor.
+	 */
+	public function __construct() {
+		$this->register_default_gateways();
+
+		/**
+		 * Filter the registered DropKey WP payment gateways.
+		 *
+		 * @since 0.1.0
+		 *
+		 * @param PaymentGatewayInterface[] $gateways Registered gateways.
+		 */
+		$this->gateways = apply_filters(
+			'dropkey_wp_payment_gateways',
+			$this->gateways
+		);
+	}
+
+	/**
+	 * Get a gateway by its identifier.
+	 *
+	 * @param string $gateway_id Gateway identifier.
+	 * @return PaymentGatewayInterface|null
+	 */
+	public function get( $gateway_id ) {
+		$gateway_id = sanitize_key( $gateway_id );
+
+		if (
+			isset( $this->gateways[ $gateway_id ] )
+			&& $this->gateways[ $gateway_id ] instanceof PaymentGatewayInterface
+		) {
+			return $this->gateways[ $gateway_id ];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get all registered gateways.
+	 *
+	 * @return PaymentGatewayInterface[]
+	 */
+	public function all() {
+		return $this->gateways;
+	}
+
+	/**
+	 * Determine whether a gateway is registered.
+	 *
+	 * @param string $gateway_id Gateway identifier.
+	 * @return bool
+	 */
+	public function has( $gateway_id ) {
+		return null !== $this->get( $gateway_id );
+	}
+
+	/**
+	 * Get all currently available gateways.
+	 *
+	 * @return PaymentGatewayInterface[]
+	 */
+	public function available() {
+		$available = array();
+
+		foreach ( $this->gateways as $gateway_id => $gateway ) {
+			if ( $gateway->is_available() ) {
+				$available[ $gateway_id ] = $gateway;
+			}
+		}
+
+		return $available;
+	}
+
+	/**
+	 * Register the default gateways.
+	 *
+	 * @return void
+	 */
+	private function register_default_gateways() {
+		$paypal_settings = PayPalSettings::get();
+
+		$this->register(
+			new PayPalGateway(
+				$paypal_settings['client_id'],
+				$paypal_settings['client_secret'],
+				PayPalSettings::ENVIRONMENT_SANDBOX === $paypal_settings['environment']
+			)
+		);
+	}
+
+	/**
+	 * Register a gateway instance.
+	 *
+	 * @param PaymentGatewayInterface $gateway Gateway instance.
+	 * @return bool
+	 */
+	private function register( PaymentGatewayInterface $gateway ) {
+		$gateway_id = sanitize_key(
+			$gateway->get_id()
+		);
+
+		if ( '' === $gateway_id ) {
+			return false;
+		}
+
+		$this->gateways[ $gateway_id ] = $gateway;
+
+		return true;
+	}
+}
+<?php
+/**
+ * DropKey WP plugin bootstrap.
+ *
+ * @package DropKeyWP
+ */
+
+namespace DropKeyWP;
+
+use DropKeyWP\Admin\TestConsole;
+use DropKeyWP\Application\SynchronizeSubscriptionEntitlement;
+use DropKeyWP\Database\Installer;
+use DropKeyWP\Database\Repositories\ActivationRepository;
+use DropKeyWP\Database\Repositories\LicenseRepository;
+use DropKeyWP\Database\Schema;
+use DropKeyWP\Gateways\GatewayManager;
+use DropKeyWP\Gateways\PayPal\PayPalGateway;
+use DropKeyWP\Gateways\PayPal\PayPalSettings;
+use DropKeyWP\REST\LicenseController;
+
+defined( 'ABSPATH' ) || exit;
+
+final class Plugin {
+
+	/**
+	 * Singleton instance.
+	 *
+	 * @var Plugin|null
+	 */
+	private static $instance = null;
+
+	/**
+	 * Whether the plugin has already booted.
+	 *
+	 * @var bool
+	 */
+	private $booted = false;
+
+	/**
+	 * Payment gateway manager.
+	 *
+	 * @var GatewayManager
+	 */
+	private $gateway_manager;
+
+	/**
+	 * Get the singleton instance.
+	 *
+	 * @return Plugin
+	 */
+	public static function instance() {
+		if ( null === self::$instance ) {
+			self::$instance = new self();
+		}
+
+		return self::$instance;
+	}
+
+	/**
+	 * Constructor.
+	 */
+	private function __construct() {}
+
+	/**
+	 * Prevent cloning.
+	 */
+	private function __clone() {}
+
+	/**
+	 * Boot the plugin.
+	 *
+	 * @return void
+	 */
+	public function boot() {
+		if ( $this->booted ) {
+			return;
+		}
+
+		$this->booted = true;
+
+		$this->maybe_upgrade_database();
+
+		$this->gateway_manager = new GatewayManager();
+
+		add_action(
+			'rest_api_init',
+			array( $this, 'register_rest_routes' )
+		);
+
+		add_action(
+			'dropkey_wp_subscription_activated',
+			array( $this, 'synchronize_subscription_entitlement' )
+		);
+
+		add_action(
+			'dropkey_wp_subscription_past_due',
+			array( $this, 'synchronize_subscription_entitlement' )
+		);
+
+		add_action(
+			'dropkey_wp_subscription_suspended',
+			array( $this, 'synchronize_subscription_entitlement' )
+		);
+
+		add_action(
+			'dropkey_wp_subscription_cancelled',
+			array( $this, 'synchronize_subscription_entitlement' )
+		);
+
+		add_action(
+			'dropkey_wp_subscription_expired',
+			array( $this, 'synchronize_subscription_entitlement' )
+		);
+
+		add_action(
+			'admin_menu',
+			array( $this, 'register_settings_page' )
+		);
+
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			$test_console = new TestConsole(
+				$this->gateway_manager
+			);
+
+			$test_console->register();
+		}
+
+		do_action( 'dropkey_wp_loaded' );
+	}
+
+	/**
+	 * Synchronize a subscription's entitlement with its license.
+	 *
+	 * @param \DropKeyWP\Domain\Subscription $subscription Subscription entity.
+	 * @return void
+	 */
+	public function synchronize_subscription_entitlement( $subscription ) {
+		global $wpdb;
+
+		$licenses = new LicenseRepository( $wpdb );
+
+		$service = new SynchronizeSubscriptionEntitlement(
+			$licenses
+		);
+
+		$result = $service->execute( $subscription );
+
+		if ( is_wp_error( $result ) ) {
+			do_action(
+				'dropkey_wp_subscription_entitlement_sync_failed',
+				$subscription,
+				$result
+			);
+		}
+	}
+
+	/**
+	 * Register the DropKey WP settings page.
+	 *
+	 * @return void
+	 */
+	public function register_settings_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		add_options_page(
+			__( 'DropKey WP', 'dropkey-wp' ),
+			__( 'DropKey WP', 'dropkey-wp' ),
+			'manage_options',
+			'dropkey-wp-settings',
+			array( $this, 'render_settings_page' )
+		);
+	}
+
+	/**
+	 * Render the DropKey WP settings page.
+	 *
+	 * @return void
+	 */
+	public function render_settings_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$message = '';
+		$error   = '';
+
+		if (
+			isset( $_POST['dropkey_wp_save_paypal'] )
+			&& check_admin_referer( 'dropkey_wp_save_paypal_settings' )
+		) {
+			$result = $this->save_paypal_settings();
+
+			if ( is_wp_error( $result ) ) {
+				$error = $result->get_error_message();
+			} else {
+				$message = __(
+					'PayPal settings saved.',
+					'dropkey-wp'
+				);
+
+				/*
+				 * Rebuild the gateway manager so the current request
+				 * uses the newly saved credentials.
+				 */
+				$this->gateway_manager = new GatewayManager();
+			}
+		}
+
+		if (
+			isset( $_POST['dropkey_wp_test_paypal'] )
+			&& check_admin_referer( 'dropkey_wp_test_paypal_connection' )
+		) {
+			$result = $this->test_paypal_connection();
+
+			if ( is_wp_error( $result ) ) {
+				$error = $result->get_error_message();
+			} else {
+				$message = __(
+					'PayPal connection successful. DropKey WP authenticated with PayPal.',
+					'dropkey-wp'
+				);
+			}
+		}
+
+		$settings = PayPalSettings::get();
+
+		?>
+		<div class="wrap">
+			<h1><?php echo esc_html__( 'DropKey WP', 'dropkey-wp' ); ?></h1>
+
+			<?php if ( '' !== $message ) : ?>
+				<div class="notice notice-success is-dismissible">
+					<p><?php echo esc_html( $message ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( '' !== $error ) : ?>
+				<div class="notice notice-error">
+					<p><?php echo esc_html( $error ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<div
+				style="
+					background:#fff;
+					border:1px solid #dcdcde;
+					padding:24px;
+					margin-top:20px;
+					max-width:800px;
+				"
+			>
+				<h2 style="margin-top:0;">
+					<?php echo esc_html__( 'PayPal', 'dropkey-wp' ); ?>
+				</h2>
+
+				<p>
+					<?php
+					echo esc_html__(
+						'Configure the PayPal REST API credentials used by DropKey WP.',
+						'dropkey-wp'
+					);
+					?>
+				</p>
+
+				<form method="post">
+					<?php wp_nonce_field( 'dropkey_wp_save_paypal_settings' ); ?>
+
+					<table class="form-table" role="presentation">
+						<tbody>
+							<tr>
+								<th scope="row">
+									<label for="dropkey-paypal-environment">
+										<?php echo esc_html__( 'Environment', 'dropkey-wp' ); ?>
+									</label>
+								</th>
+								<td>
+									<select
+										id="dropkey-paypal-environment"
+										name="paypal_environment"
+									>
+										<option
+											value="sandbox"
+											<?php selected( $settings['environment'], 'sandbox' ); ?>
+										>
+											<?php echo esc_html__( 'Sandbox', 'dropkey-wp' ); ?>
+										</option>
+
+										<option
+											value="live"
+											<?php selected( $settings['environment'], 'live' ); ?>
+										>
+											<?php echo esc_html__( 'Live', 'dropkey-wp' ); ?>
+										</option>
+									</select>
+
+									<p class="description">
+										<?php
+										echo esc_html__(
+											'Use Sandbox while developing and testing. Switch to Live only when the integration is ready for production.',
+											'dropkey-wp'
+										);
+										?>
+									</p>
+								</td>
+							</tr>
+
+							<tr>
+								<th scope="row">
+									<label for="dropkey-paypal-client-id">
+										<?php echo esc_html__( 'Client ID', 'dropkey-wp' ); ?>
+									</label>
+								</th>
+								<td>
+									<input
+										type="text"
+										class="regular-text"
+										id="dropkey-paypal-client-id"
+										name="paypal_client_id"
+										value="<?php echo esc_attr( $settings['client_id'] ); ?>"
+										autocomplete="off"
+									/>
+
+									<p class="description">
+										<?php
+										echo esc_html__(
+											'Your PayPal REST API application Client ID.',
+											'dropkey-wp'
+										);
+										?>
+									</p>
+								</td>
+							</tr>
+
+							<tr>
+								<th scope="row">
+									<label for="dropkey-paypal-client-secret">
+										<?php echo esc_html__( 'Client Secret', 'dropkey-wp' ); ?>
+									</label>
+								</th>
+								<td>
+									<input
+										type="password"
+										class="regular-text"
+										id="dropkey-paypal-client-secret"
+										name="paypal_client_secret"
+										value=""
+										autocomplete="new-password"
+									/>
+
+									<p class="description">
+										<?php
+										if ( '' !== $settings['client_secret'] ) {
+											echo esc_html__(
+												'Leave blank to keep the existing Client Secret.',
+												'dropkey-wp'
+											);
+										} else {
+											echo esc_html__(
+												'Your PayPal REST API application Client Secret.',
+												'dropkey-wp'
+											);
+										}
+										?>
+									</p>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+
+					<?php
+					submit_button(
+						__( 'Save PayPal Settings', 'dropkey-wp' ),
+						'primary',
+						'dropkey_wp_save_paypal'
+					);
+					?>
+				</form>
+
+				<hr style="margin:30px 0;">
+
+				<h2>
+					<?php echo esc_html__( 'Connection Test', 'dropkey-wp' ); ?>
+				</h2>
+
+				<p>
+					<?php
+					echo esc_html__(
+						'Test the saved PayPal credentials by requesting an OAuth access token. The access token is never displayed or stored permanently.',
+						'dropkey-wp'
+					);
+					?>
+				</p>
+
+				<form method="post">
+					<?php wp_nonce_field( 'dropkey_wp_test_paypal_connection' ); ?>
+
+					<?php
+					submit_button(
+						__( 'Test PayPal Connection', 'dropkey-wp' ),
+						'secondary',
+						'dropkey_wp_test_paypal'
+					);
+					?>
+				</form>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Save PayPal settings.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private function save_paypal_settings() {
+		$environment = isset( $_POST['paypal_environment'] )
+			? sanitize_key( wp_unslash( $_POST['paypal_environment'] ) )
+			: PayPalSettings::ENVIRONMENT_SANDBOX;
+
+		$client_id = isset( $_POST['paypal_client_id'] )
+			? sanitize_text_field( wp_unslash( $_POST['paypal_client_id'] ) )
+			: '';
+
+		$client_secret = isset( $_POST['paypal_client_secret'] )
+			? trim( (string) wp_unslash( $_POST['paypal_client_secret'] ) )
+			: '';
+
+		if (
+			PayPalSettings::ENVIRONMENT_SANDBOX !== $environment
+			&& PayPalSettings::ENVIRONMENT_LIVE !== $environment
+		) {
+			return new \WP_Error(
+				'dropkey_invalid_paypal_environment',
+				__( 'Invalid PayPal environment.', 'dropkey-wp' )
+			);
+		}
+
+		if ( '' === $client_id ) {
+			return new \WP_Error(
+				'dropkey_missing_paypal_client_id',
+				__( 'PayPal Client ID is required.', 'dropkey-wp' )
+			);
+		}
+
+		$current = PayPalSettings::get();
+
+		if ( '' === $client_secret && '' === $current['client_secret'] ) {
+			return new \WP_Error(
+				'dropkey_missing_paypal_client_secret',
+				__( 'PayPal Client Secret is required.', 'dropkey-wp' )
+			);
+		}
+
+		$saved = PayPalSettings::save(
+			array(
+				'environment'   => $environment,
+				'client_id'     => $client_id,
+				'client_secret' => $client_secret,
+			)
+		);
+
+		if ( ! $saved && PayPalSettings::get() !== array(
+			'environment'   => $environment,
+			'client_id'     => $client_id,
+			'client_secret' => '' !== $client_secret
+				? $client_secret
+				: $current['client_secret'],
+		) ) {
+			return new \WP_Error(
+				'dropkey_paypal_settings_save_failed',
+				__(
+					'PayPal settings could not be saved.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Test the configured PayPal connection.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private function test_paypal_connection() {
+		$gateway = $this->gateway_manager->get( 'paypal' );
+
+		if ( ! $gateway instanceof PayPalGateway ) {
+			return new \WP_Error(
+				'dropkey_paypal_gateway_unavailable',
+				__(
+					'The PayPal gateway is not available.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		return $gateway->test_connection();
+	}
+
+	/**
+	 * Register REST routes.
+	 *
+	 * @return void
+	 */
+	public function register_rest_routes() {
+		global $wpdb;
+
+		$licenses    = new LicenseRepository( $wpdb );
+		$activations = new ActivationRepository( $wpdb );
+
+		$controller = new LicenseController(
+			$licenses,
+			$activations
+		);
+
+		$controller->register_routes();
+	}
+
+	/**
+	 * Get the payment gateway manager.
+	 *
+	 * @return GatewayManager|null
+	 */
+	public function get_gateway_manager() {
+		return $this->gateway_manager;
+	}
+
+	/**
+	 * Run database upgrade if necessary.
+	 *
+	 * @return void
+	 */
+	private function maybe_upgrade_database() {
+		if ( Installer::get_version() < Schema::VERSION ) {
+			Installer::install();
+		}
+	}
+}
+<?php
+/**
+ * DropKey WP development test console.
+ *
+ * @package DropKeyWP
+ */
+
+namespace DropKeyWP\Admin;
+
+use DropKeyWP\Application\ActivateSubscription;
+use DropKeyWP\Application\ChangeSubscriptionStatus;
+use DropKeyWP\Application\CreateGatewayProduct;
+use DropKeyWP\Application\CreateLicense;
+use DropKeyWP\Application\CreateSubscription;
+use DropKeyWP\Application\DeactivateLicense;
+use DropKeyWP\Database\Repositories\ActivationRepository;
+use DropKeyWP\Database\Repositories\CustomerRepository;
+use DropKeyWP\Database\Repositories\GatewayMappingRepository;
+use DropKeyWP\Database\Repositories\LicenseRepository;
+use DropKeyWP\Database\Repositories\PlanRepository;
+use DropKeyWP\Database\Repositories\ProductRepository;
+use DropKeyWP\Database\Repositories\SubscriptionRepository;
+use DropKeyWP\Domain\Activation;
+use DropKeyWP\Domain\Subscription;
+use DropKeyWP\Gateways\GatewayManager;
+
+defined( 'ABSPATH' ) || exit;
+
+final class TestConsole {
+
+	/**
+	 * Current test subscription option.
+	 *
+	 * @var string
+	 */
+	private const TEST_SUBSCRIPTION_OPTION = 'dropkey_wp_test_subscription_id';
+
+	/**
+	 * Gateway manager.
+	 *
+	 * @var GatewayManager
+	 */
+	private $gateway_manager;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param GatewayManager $gateway_manager Gateway manager.
+	 */
+	public function __construct( GatewayManager $gateway_manager ) {
+		$this->gateway_manager = $gateway_manager;
+	}
+
+	/**
+	 * Register admin hooks.
+	 *
+	 * @return void
+	 */
+	public function register() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		add_action(
+			'admin_menu',
+			array( $this, 'register_admin_page' )
+		);
+	}
+
+	/**
+	 * Register the admin page.
+	 *
+	 * @return void
+	 */
+	public function register_admin_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		add_management_page(
+			__( 'DropKey WP Test Console', 'dropkey-wp' ),
+			__( 'DropKey WP Test Console', 'dropkey-wp' ),
+			'manage_options',
+			'dropkey-wp-test-console',
+			array( $this, 'render' )
+		);
+	}
+
+	/**
+	 * Render the test console.
+	 *
+	 * @return void
+	 */
+	public function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$message = '';
+
+		if (
+			isset( $_POST['dropkey_wp_test_action'] )
+			&& check_admin_referer( 'dropkey_wp_test_console' )
+		) {
+			$message = $this->handle_action(
+				sanitize_key( wp_unslash( $_POST['dropkey_wp_test_action'] ) )
+			);
+		}
+
+		$gateway_status = $this->get_gateway_status();
+		$context        = $this->get_test_context();
+
+		?>
+		<div class="wrap">
+			<h1><?php echo esc_html__( 'DropKey WP Test Console', 'dropkey-wp' ); ?></h1>
+
+			<?php if ( '' !== $message ) : ?>
+				<div class="notice notice-info is-dismissible">
+					<p><?php echo esc_html( $message ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<div
+				style="
+					background:#fff;
+					border:1px solid #dcdcde;
+					padding:20px;
+					margin-top:20px;
+					max-width:1100px;
+				"
+			>
+				<h2 style="margin-top:0;">
+					<?php echo esc_html__( 'Gateway Manager', 'dropkey-wp' ); ?>
+				</h2>
+
+				<?php if ( empty( $gateway_status ) ) : ?>
+					<p>
+						<?php echo esc_html__( 'No payment gateways are registered.', 'dropkey-wp' ); ?>
+					</p>
+				<?php else : ?>
+					<table class="widefat striped">
+						<thead>
+							<tr>
+								<th><?php echo esc_html__( 'Gateway', 'dropkey-wp' ); ?></th>
+								<th><?php echo esc_html__( 'ID', 'dropkey-wp' ); ?></th>
+								<th><?php echo esc_html__( 'Available', 'dropkey-wp' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $gateway_status as $gateway ) : ?>
+								<tr>
+									<td>
+										<strong>
+											<?php echo esc_html( $gateway['name'] ); ?>
+										</strong>
+									</td>
+									<td>
+										<code>
+											<?php echo esc_html( $gateway['id'] ); ?>
+										</code>
+									</td>
+									<td>
+										<?php if ( $gateway['available'] ) : ?>
+											<span style="color:#008a20;font-weight:600;">
+												<?php echo esc_html__( 'Yes', 'dropkey-wp' ); ?>
+											</span>
+										<?php else : ?>
+											<span style="color:#b32d2e;font-weight:600;">
+												<?php echo esc_html__( 'No â€” not configured', 'dropkey-wp' ); ?>
+											</span>
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+			</div>
+
+			<div
+				style="
+					background:#fff;
+					border:1px solid #dcdcde;
+					padding:20px;
+					margin-top:20px;
+					max-width:1100px;
+				"
+			>
+				<h2 style="margin-top:0;">
+					<?php echo esc_html__( 'Gateway Products', 'dropkey-wp' ); ?>
+				</h2>
+
+				<p>
+					<?php
+					echo esc_html__(
+						'Create the external payment-gateway product for the existing DropKey product #1. Each registered gateway has its own external product and mapping. If a mapping already exists, no duplicate external product will be created.',
+						'dropkey-wp'
+					);
+					?>
+				</p>
+
+				<?php
+				global $wpdb;
+
+				$products = new ProductRepository( $wpdb );
+				$product  = $products->find( 1 );
+				$mappings = new GatewayMappingRepository( $wpdb );
+				?>
+
+				<?php if ( ! $product ) : ?>
+					<p>
+						<strong>
+							<?php echo esc_html__( 'Product #1 was not found.', 'dropkey-wp' ); ?>
+						</strong>
+					</p>
+				<?php elseif ( empty( $gateway_status ) ) : ?>
+					<p>
+						<?php echo esc_html__( 'No payment gateways are registered.', 'dropkey-wp' ); ?>
+					</p>
+				<?php else : ?>
+					<table class="widefat striped">
+						<thead>
+							<tr>
+								<th><?php echo esc_html__( 'Gateway', 'dropkey-wp' ); ?></th>
+								<th><?php echo esc_html__( 'Status', 'dropkey-wp' ); ?></th>
+								<th><?php echo esc_html__( 'External Product ID', 'dropkey-wp' ); ?></th>
+								<th><?php echo esc_html__( 'Action', 'dropkey-wp' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $gateway_status as $gateway ) : ?>
+								<?php
+								$mapping = $mappings->find_by_entity(
+									$gateway['id'],
+									'product',
+									$product->get_id()
+								);
+								?>
+								<tr>
+									<td>
+										<strong>
+											<?php echo esc_html( $gateway['name'] ); ?>
+										</strong>
+										<br />
+										<code>
+											<?php echo esc_html( $gateway['id'] ); ?>
+										</code>
+									</td>
+
+									<td>
+										<?php if ( $mapping ) : ?>
+											<span style="color:#008a20;font-weight:600;">
+												<?php echo esc_html__( 'Mapped', 'dropkey-wp' ); ?>
+											</span>
+										<?php elseif ( $gateway['available'] ) : ?>
+											<span>
+												<?php echo esc_html__( 'Not mapped', 'dropkey-wp' ); ?>
+											</span>
+										<?php else : ?>
+											<span style="color:#b32d2e;font-weight:600;">
+												<?php echo esc_html__( 'Unavailable', 'dropkey-wp' ); ?>
+											</span>
+										<?php endif; ?>
+									</td>
+
+									<td>
+										<?php if ( $mapping ) : ?>
+											<code>
+												<?php echo esc_html( $mapping->get_external_id() ); ?>
+											</code>
+										<?php else : ?>
+											<span style="color:#646970;">
+												<?php echo esc_html__( 'â€”', 'dropkey-wp' ); ?>
+											</span>
+										<?php endif; ?>
+									</td>
+
+									<td>
+										<?php if ( $mapping ) : ?>
+											<span>
+												<?php echo esc_html__( 'Already mapped', 'dropkey-wp' ); ?>
+											</span>
+										<?php elseif ( $gateway['available'] ) : ?>
+											<form method="post">
+												<?php wp_nonce_field( 'dropkey_wp_test_console' ); ?>
+
+												<input
+													type="hidden"
+													name="dropkey_wp_test_action"
+													value="create_gateway_product"
+												/>
+
+												<input
+													type="hidden"
+													name="gateway_id"
+													value="<?php echo esc_attr( $gateway['id'] ); ?>"
+												/>
+
+												<input
+													type="hidden"
+													name="product_id"
+													value="<?php echo esc_attr( $product->get_id() ); ?>"
+												/>
+
+												<?php
+												submit_button(
+													sprintf(
+														/* translators: %s: gateway name. */
+														__( 'Create %s Product', 'dropkey-wp' ),
+														$gateway['name']
+													),
+													'primary',
+													'submit',
+													false
+												);
+												?>
+											</form>
+										<?php else : ?>
+											<span style="color:#646970;">
+												<?php echo esc_html__( 'Configure gateway first', 'dropkey-wp' ); ?>
+											</span>
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+			</div>
+
+			<div
+				style="
+					background:#fff;
+					border:1px solid #dcdcde;
+					padding:20px;
+					margin-top:20px;
+					max-width:1100px;
+				"
+			>
+				<h2 style="margin-top:0;">
+					<?php echo esc_html__( 'Test Data', 'dropkey-wp' ); ?>
+				</h2>
+
+				<p>
+					<?php
+					echo esc_html__(
+						'Create a fresh subscription and license using the existing test customer, product, and plan.',
+						'dropkey-wp'
+					);
+					?>
+				</p>
+
+				<form method="post">
+					<?php wp_nonce_field( 'dropkey_wp_test_console' ); ?>
+
+					<input
+						type="hidden"
+						name="dropkey_wp_test_action"
+						value="create_fresh"
+					/>
+
+					<?php
+					submit_button(
+						__( 'Create Fresh Test Data', 'dropkey-wp' ),
+						'primary',
+						'submit',
+						false
+					);
+					?>
+				</form>
+			</div>
+
+			<?php if ( $context ) : ?>
+				<div
+					style="
+						background:#fff;
+						border:1px solid #dcdcde;
+						padding:20px;
+						margin-top:20px;
+						max-width:1100px;
+					"
+				>
+					<h2 style="margin-top:0;">
+						<?php echo esc_html__( 'Current Test Data', 'dropkey-wp' ); ?>
+					</h2>
+
+					<table class="widefat striped">
+						<tbody>
+							<tr>
+								<th style="width:180px;">
+									<?php echo esc_html__( 'Product', 'dropkey-wp' ); ?>
+								</th>
+								<td>
+									<?php echo esc_html( $context['product']->get_name() ); ?>
+									<code>#<?php echo esc_html( $context['product']->get_id() ); ?></code>
+								</td>
+							</tr>
+
+							<tr>
+								<th>
+									<?php echo esc_html__( 'Plan', 'dropkey-wp' ); ?>
+								</th>
+								<td>
+									<?php echo esc_html( $context['plan']->get_name() ); ?>
+									<code>#<?php echo esc_html( $context['plan']->get_id() ); ?></code>
+								</td>
+							</tr>
+
+							<tr>
+								<th>
+									<?php echo esc_html__( 'Subscription', 'dropkey-wp' ); ?>
+								</th>
+								<td>
+									<code>#<?php echo esc_html( $context['subscription']->get_id() ); ?></code>
+								</td>
+							</tr>
+
+							<tr>
+								<th>
+									<?php echo esc_html__( 'Subscription Status', 'dropkey-wp' ); ?>
+								</th>
+								<td>
+									<strong>
+										<?php echo esc_html( $context['subscription']->get_status() ); ?>
+									</strong>
+								</td>
+							</tr>
+
+							<?php if ( $context['license'] ) : ?>
+								<tr>
+									<th>
+										<?php echo esc_html__( 'License', 'dropkey-wp' ); ?>
+									</th>
+									<td>
+										<code>#<?php echo esc_html( $context['license']->get_id() ); ?></code>
+									</td>
+								</tr>
+
+								<tr>
+									<th>
+										<?php echo esc_html__( 'License Status', 'dropkey-wp' ); ?>
+									</th>
+									<td>
+										<strong>
+											<?php echo esc_html( $context['license']->get_status() ); ?>
+										</strong>
+									</td>
+								</tr>
+							<?php endif; ?>
+
+							<?php if ( $context['activation'] ) : ?>
+								<tr>
+									<th>
+										<?php echo esc_html__( 'Activation', 'dropkey-wp' ); ?>
+									</th>
+									<td>
+										<code>#<?php echo esc_html( $context['activation']->get_id() ); ?></code>
+									</td>
+								</tr>
+
+								<tr>
+									<th>
+										<?php echo esc_html__( 'Activation Status', 'dropkey-wp' ); ?>
+									</th>
+									<td>
+										<strong>
+											<?php echo esc_html( $context['activation']->get_status() ); ?>
+										</strong>
+									</td>
+								</tr>
+							<?php endif; ?>
+						</tbody>
+					</table>
+				</div>
+
+				<div
+					style="
+						background:#fff;
+						border:1px solid #dcdcde;
+						padding:20px;
+						margin-top:20px;
+						max-width:1100px;
+					"
+				>
+					<h2 style="margin-top:0;">
+						<?php echo esc_html__( 'Subscription Lifecycle', 'dropkey-wp' ); ?>
+					</h2>
+
+					<?php $next_statuses = $this->get_next_statuses( $context['subscription']->get_status() ); ?>
+
+					<?php if ( empty( $next_statuses ) ) : ?>
+						<p>
+							<?php echo esc_html__( 'No further lifecycle transitions are available for this subscription.', 'dropkey-wp' ); ?>
+						</p>
+					<?php else : ?>
+						<div style="display:flex;gap:8px;flex-wrap:wrap;">
+							<?php foreach ( $next_statuses as $status ) : ?>
+								<form method="post">
+									<?php wp_nonce_field( 'dropkey_wp_test_console' ); ?>
+
+									<input
+										type="hidden"
+										name="dropkey_wp_test_action"
+										value="change_status"
+									/>
+
+									<input
+										type="hidden"
+										name="status"
+										value="<?php echo esc_attr( $status ); ?>"
+									/>
+
+									<?php
+									submit_button(
+										sprintf(
+											/* translators: %s: subscription status. */
+											__( 'Set %s', 'dropkey-wp' ),
+											$status
+										),
+										'secondary',
+										'submit',
+										false
+									);
+									?>
+								</form>
+							<?php endforeach; ?>
+						</div>
+					<?php endif; ?>
+				</div>
+
+				<?php if ( $context['activation'] ) : ?>
+					<div
+						style="
+							background:#fff;
+							border:1px solid #dcdcde;
+							padding:20px;
+							margin-top:20px;
+							max-width:1100px;
+						"
+					>
+						<h2 style="margin-top:0;">
+							<?php echo esc_html__( 'Activation', 'dropkey-wp' ); ?>
+						</h2>
+
+						<?php if ( Activation::STATUS_ACTIVE === $context['activation']->get_status() ) : ?>
+							<form method="post">
+								<?php wp_nonce_field( 'dropkey_wp_test_console' ); ?>
+
+								<input
+									type="hidden"
+									name="dropkey_wp_test_action"
+									value="deactivate_activation"
+								/>
+
+								<input
+									type="hidden"
+									name="activation_id"
+									value="<?php echo esc_attr( $context['activation']->get_id() ); ?>"
+								/>
+
+								<?php
+								submit_button(
+									__( 'Deactivate Activation', 'dropkey-wp' ),
+									'secondary',
+									'submit',
+									false
+								);
+								?>
+							</form>
+						<?php else : ?>
+							<form method="post">
+								<?php wp_nonce_field( 'dropkey_wp_test_console' ); ?>
+
+								<input
+									type="hidden"
+									name="dropkey_wp_test_action"
+									value="reactivate_activation"
+								/>
+
+								<input
+									type="hidden"
+									name="activation_id"
+									value="<?php echo esc_attr( $context['activation']->get_id() ); ?>"
+								/>
+
+								<?php
+								submit_button(
+									__( 'Reactivate Activation', 'dropkey-wp' ),
+									'secondary',
+									'submit',
+									false
+								);
+								?>
+							</form>
+						<?php endif; ?>
+					</div>
+				<?php endif; ?>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Handle a console action.
+	 *
+	 * @param string $action Action name.
+	 * @return string
+	 */
+	private function handle_action( $action ) {
+		switch ( $action ) {
+			case 'create_fresh':
+				return $this->create_fresh_test_data();
+
+			case 'create_gateway_product':
+				return $this->create_gateway_product();
+
+			case 'change_status':
+				return $this->change_subscription_status();
+
+			case 'deactivate_activation':
+				return $this->deactivate_activation();
+
+			case 'reactivate_activation':
+				return $this->reactivate_activation();
+
+			default:
+				return __( 'Unknown test action.', 'dropkey-wp' );
+		}
+	}
+
+	/**
+	 * Create a gateway product mapping.
+	 *
+	 * @return string
+	 */
+	private function create_gateway_product() {
+		global $wpdb;
+
+		$product_id = isset( $_POST['product_id'] )
+			? absint( $_POST['product_id'] )
+			: 0;
+
+		$gateway_id = isset( $_POST['gateway_id'] )
+			? sanitize_key( wp_unslash( $_POST['gateway_id'] ) )
+			: '';
+
+		if ( ! $product_id ) {
+			return __( 'No product was supplied.', 'dropkey-wp' );
+		}
+
+		if ( '' === $gateway_id ) {
+			return __( 'No payment gateway was supplied.', 'dropkey-wp' );
+		}
+
+		$products = new ProductRepository( $wpdb );
+		$mappings = new GatewayMappingRepository( $wpdb );
+
+		$service = new CreateGatewayProduct(
+			$products,
+			$mappings,
+			$this->gateway_manager
+		);
+
+		$result = $service->execute(
+			$product_id,
+			$gateway_id
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result->get_error_message();
+		}
+
+		$mapping = $result['mapping'];
+
+		if ( empty( $result['created'] ) ) {
+			return sprintf(
+				/* translators: 1: gateway name, 2: external product ID, 3: mapping ID. */
+				__(
+					'%1$s product already mapped. External Product ID: %2$s. Mapping #%3$d.',
+					'dropkey-wp'
+				),
+				$this->get_gateway_name( $gateway_id ),
+				$mapping->get_external_id(),
+				$mapping->get_id()
+			);
+		}
+
+		return sprintf(
+			/* translators: 1: gateway name, 2: external product ID, 3: mapping ID. */
+			__(
+				'%1$s product created successfully. External Product ID: %2$s. Mapping #%3$d.',
+				'dropkey-wp'
+			),
+			$this->get_gateway_name( $gateway_id ),
+			$mapping->get_external_id(),
+			$mapping->get_id()
+		);
+	}
+
+	/**
+	 * Create fresh test subscription and license.
+	 *
+	 * @return string
+	 */
+	private function create_fresh_test_data() {
+		global $wpdb;
+
+		$customers     = new CustomerRepository( $wpdb );
+		$products      = new ProductRepository( $wpdb );
+		$plans         = new PlanRepository( $wpdb );
+		$subscriptions = new SubscriptionRepository( $wpdb );
+		$licenses      = new LicenseRepository( $wpdb );
+
+		$customer = $customers->find( 1 );
+		$product  = $products->find( 1 );
+		$plan     = $plans->find( 1 );
+
+		if ( ! $customer || ! $product || ! $plan ) {
+			return __( 'Required test customer, product, or plan was not found.', 'dropkey-wp' );
+		}
+
+		$create_subscription = new CreateSubscription(
+			$subscriptions,
+			$customers,
+			$products,
+			$plans
+		);
+
+		$subscription = $create_subscription->execute(
+			array(
+				'customer_id'             => $customer->get_id(),
+				'product_id'              => $product->get_id(),
+				'plan_id'                 => $plan->get_id(),
+				'gateway'                 => 'test',
+				'gateway_subscription_id' => 'test_subscription_' . wp_generate_uuid4(),
+				'current_period_start'    => gmdate( 'Y-m-d H:i:s' ),
+				'current_period_end'      => gmdate( 'Y-m-d H:i:s', strtotime( '+1 month' ) ),
+			)
+		);
+
+		if ( is_wp_error( $subscription ) ) {
+			return $subscription->get_error_message();
+		}
+
+		$activate_subscription = new ActivateSubscription(
+			$subscriptions
+		);
+
+		$subscription = $activate_subscription->execute(
+			$subscription->get_id()
+		);
+
+		if ( is_wp_error( $subscription ) ) {
+			return $subscription->get_error_message();
+		}
+
+		$create_license = new CreateLicense(
+			$licenses,
+			$subscriptions,
+			$products,
+			$plans
+		);
+
+		$license = $create_license->execute(
+			array(
+				'customer_id'      => $customer->get_id(),
+				'product_id'       => $product->get_id(),
+				'subscription_id'  => $subscription->get_id(),
+				'activation_limit' => $plan->get_activation_limit(),
+				'expires_at'       => $subscription->get_current_period_end(),
+			)
+		);
+
+		if ( is_wp_error( $license ) ) {
+			return $license->get_error_message();
+		}
+
+		update_option(
+			self::TEST_SUBSCRIPTION_OPTION,
+			$subscription->get_id(),
+			false
+		);
+
+		return sprintf(
+			/* translators: 1: subscription ID, 2: license ID. */
+			__( 'Fresh test data created. Subscription #%1$d, License #%2$d.', 'dropkey-wp' ),
+			$subscription->get_id(),
+			$license->get_id()
+		);
+	}
+
+	/**
+	 * Change the current subscription status.
+	 *
+	 * @return string
+	 */
+	private function change_subscription_status() {
+		global $wpdb;
+
+		$subscription_id = $this->get_current_subscription_id();
+
+		if ( ! $subscription_id ) {
+			return __( 'No current test subscription found.', 'dropkey-wp' );
+		}
+
+		$status = isset( $_POST['status'] )
+			? sanitize_key( wp_unslash( $_POST['status'] ) )
+			: '';
+
+		if ( '' === $status ) {
+			return __( 'No subscription status was supplied.', 'dropkey-wp' );
+		}
+
+		$subscriptions = new SubscriptionRepository( $wpdb );
+
+		$service = new ChangeSubscriptionStatus(
+			$subscriptions
+		);
+
+		$result = $service->execute(
+			$subscription_id,
+			$status
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result->get_error_message();
+		}
+
+		return sprintf(
+			/* translators: 1: subscription ID, 2: subscription status. */
+			__( 'Subscription #%1$d changed to %2$s.', 'dropkey-wp' ),
+			$result->get_id(),
+			$result->get_status()
+		);
+	}
+
+	/**
+	 * Deactivate the current activation.
+	 *
+	 * @return string
+	 */
+	private function deactivate_activation() {
+		global $wpdb;
+
+		$activation_id = isset( $_POST['activation_id'] )
+			? absint( $_POST['activation_id'] )
+			: 0;
+
+		if ( ! $activation_id ) {
+			return __( 'No activation was supplied.', 'dropkey-wp' );
+		}
+
+		$activations = new ActivationRepository( $wpdb );
+		$licenses    = new LicenseRepository( $wpdb );
+
+		$service = new DeactivateLicense(
+			$activations,
+			$licenses
+		);
+
+		$result = $service->execute( $activation_id );
+
+		if ( is_wp_error( $result ) ) {
+			return $result->get_error_message();
+		}
+
+		return sprintf(
+			/* translators: %d: activation ID. */
+			__( 'Activation #%d deactivated.', 'dropkey-wp' ),
+			$result->get_id()
+		);
+	}
+
+	/**
+	 * Reactivate the current activation.
+	 *
+	 * @return string
+	 */
+	private function reactivate_activation() {
+		global $wpdb;
+
+		$activation_id = isset( $_POST['activation_id'] )
+			? absint( $_POST['activation_id'] )
+			: 0;
+
+		if ( ! $activation_id ) {
+			return __( 'No activation was supplied.', 'dropkey-wp' );
+		}
+
+		$activations = new ActivationRepository( $wpdb );
+		$activation  = $activations->find( $activation_id );
+
+		if ( ! $activation ) {
+			return __( 'Activation was not found.', 'dropkey-wp' );
+		}
+
+		if ( Activation::STATUS_ACTIVE === $activation->get_status() ) {
+			return __( 'Activation is already active.', 'dropkey-wp' );
+		}
+
+		$result = $activations->reactivate(
+			$activation_id,
+			wp_generate_password( 64, false, false )
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result->get_error_message();
+		}
+
+		return sprintf(
+			/* translators: %d: activation ID. */
+			__( 'Activation #%d reactivated.', 'dropkey-wp' ),
+			$result->get_id()
+		);
+	}
+
+	/**
+	 * Get the current test context.
+	 *
+	 * @return array|null
+	 */
+	private function get_test_context() {
+		global $wpdb;
+
+		$subscription_id = $this->get_current_subscription_id();
+
+		if ( ! $subscription_id ) {
+			return null;
+		}
+
+		$subscriptions = new SubscriptionRepository( $wpdb );
+		$products      = new ProductRepository( $wpdb );
+		$plans         = new PlanRepository( $wpdb );
+		$licenses      = new LicenseRepository( $wpdb );
+		$activations   = new ActivationRepository( $wpdb );
+
+		$subscription = $subscriptions->find( $subscription_id );
+
+		if ( ! $subscription ) {
+			return null;
+		}
+
+		$product = $products->find( $subscription->get_product_id() );
+		$plan    = $plans->find( $subscription->get_plan_id() );
+
+		$license = $licenses->find_by_subscription_id(
+			$subscription->get_id()
+		);
+
+		$activation = null;
+
+		if ( $license ) {
+			$activation = $activations->find_by_license_id(
+				$license->get_id()
+			);
+		}
+
+		if ( ! $product || ! $plan ) {
+			return null;
+		}
+
+		return array(
+			'product'      => $product,
+			'plan'         => $plan,
+			'subscription' => $subscription,
+			'license'      => $license,
+			'activation'   => $activation,
+		);
+	}
+
+	/**
+	 * Get the current test subscription ID.
+	 *
+	 * @return int
+	 */
+	private function get_current_subscription_id() {
+		$subscription_id = (int) get_option(
+			self::TEST_SUBSCRIPTION_OPTION,
+			0
+		);
+
+		if ( $subscription_id > 0 ) {
+			return $subscription_id;
+		}
+
+		return 1;
+	}
+
+	/**
+	 * Get valid next subscription statuses.
+	 *
+	 * @param string $status Current status.
+	 * @return string[]
+	 */
+	private function get_next_statuses( $status ) {
+		$transitions = array(
+			Subscription::STATUS_PENDING => array(
+				Subscription::STATUS_ACTIVE,
+				Subscription::STATUS_CANCELLED,
+			),
+			Subscription::STATUS_ACTIVE => array(
+				Subscription::STATUS_PAST_DUE,
+				Subscription::STATUS_SUSPENDED,
+				Subscription::STATUS_CANCELLED,
+				Subscription::STATUS_EXPIRED,
+			),
+			Subscription::STATUS_PAST_DUE => array(
+				Subscription::STATUS_ACTIVE,
+				Subscription::STATUS_SUSPENDED,
+				Subscription::STATUS_CANCELLED,
+				Subscription::STATUS_EXPIRED,
+			),
+			Subscription::STATUS_SUSPENDED => array(
+				Subscription::STATUS_ACTIVE,
+				Subscription::STATUS_CANCELLED,
+				Subscription::STATUS_EXPIRED,
+			),
+			Subscription::STATUS_CANCELLED => array(
+				Subscription::STATUS_EXPIRED,
+			),
+			Subscription::STATUS_EXPIRED => array(),
+		);
+
+		return isset( $transitions[ $status ] )
+			? $transitions[ $status ]
+			: array();
+	}
+
+	/**
+	 * Get gateway status information.
+	 *
+	 * @return array
+	 */
+	private function get_gateway_status() {
+		$status = array();
+
+		foreach ( $this->gateway_manager->all() as $gateway ) {
+			$status[] = array(
+				'id'        => $gateway->get_id(),
+				'name'      => $gateway->get_name(),
+				'available' => $gateway->is_available(),
+			);
+		}
+
+		return $status;
+	}
+
+	/**
+	 * Get a gateway display name.
+	 *
+	 * @param string $gateway_id Gateway ID.
+	 * @return string
+	 */
+	private function get_gateway_name( $gateway_id ) {
+		$gateway = $this->gateway_manager->get( $gateway_id );
+
+		if ( ! $gateway ) {
+			return $gateway_id;
+		}
+
+		return $gateway->get_name();
+	}
+}
