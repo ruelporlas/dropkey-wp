@@ -99,12 +99,14 @@ final class Plugin {
 
 		$gateway_manager = new GatewayManager();
 
-		$paypal_settings = new PayPalSettings();
+		$paypal_settings = PayPalSettings::get();
 
 		$paypal_gateway = new PayPalGateway(
-			$paypal_settings,
+			$paypal_settings['client_id'],
+			$paypal_settings['client_secret'],
+			PayPalSettings::ENVIRONMENT_SANDBOX === $paypal_settings['environment'],
 			$gateway_mapping_repository,
-			$gateway_event_repository
+			$paypal_settings['webhook_id']
 		);
 
 		$gateway_manager->register_gateway( $paypal_gateway );
@@ -256,3 +258,4 @@ final class Plugin {
 		}
 	}
 }
+
