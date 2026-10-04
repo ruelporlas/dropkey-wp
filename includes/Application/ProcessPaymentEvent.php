@@ -366,6 +366,21 @@ final class ProcessPaymentEvent {
 		);
 
 		if ( is_wp_error( $updated ) ) {
+			/*
+			 * The ownership token prevents a stale request from changing
+			 * an event that has already been reclaimed by another request.
+			 *
+			 * A stale request must also not fire the failure action because
+			 * doing so would incorrectly notify integrations that this
+			 * request still owns the event.
+			 */
+			if (
+				'dropkey_gateway_event_processing_ownership_lost' ===
+				$updated->get_error_code()
+			) {
+				return;
+			}
+
 			error_log(
 				sprintf(
 					'DropKey WP: Failed to mark gateway event #%d as failed: %s',
