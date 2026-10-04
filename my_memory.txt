@@ -1,47 +1,114 @@
 DROPKEY WP — PROJECT MEMORY / RECOVERY FILE
 Last updated: 2026-10-04
 
-PURPOSE
-This file is the persistent recovery/reference point for the DropKey WP project. Read this file first whenever project context is needed, especially after a context reset or when there is risk of making assumptions. It is intentionally written as a compact source of project decisions, rules, current progress, and next-step state.
+==================================================
+1. PURPOSE
+==================================================
+This is the persistent recovery/checkpoint file for the DropKey WP project.
 
-CRITICAL GITHUB ACCESS RULE
+READ THIS FILE FIRST whenever DropKey WP context is needed or after a context reset. It exists specifically to prevent lost context, accidental assumptions, and hallucinated implementation details.
+
+This file records:
+- hard project rules
+- confirmed decisions
+- confirmed implementation/progress
+- recent verified testing/results
+- current work in progress
+- next intended work
+- things that are still unknown and must be verified from the repository
+
+This file is a recovery aid. It is NOT a substitute for inspecting actual repository code when implementation details matter.
+
+==================================================
+2. ABSOLUTE GITHUB ACCESS RULE
+==================================================
 Repository: ruelporlas/dropkey-wp
-Branch: main
+Primary branch: main
 
-ONLY THIS FILE MAY BE WRITTEN:
-- my_memory.txt
+WRITABLE:
+- my_memory.txt ONLY
 
-my_memory.txt is the ONLY GitHub file that may be created, modified, or replaced by the assistant without asking again.
+The assistant has standing permission to read and write my_memory.txt without asking for permission each time.
 
-ALL OTHER REPOSITORY FILES:
-- Read-only / do not modify.
-- Do not create, delete, overwrite, commit, or otherwise change them.
-- They may be inspected only when the user asks for work that requires understanding existing implementation.
-- Never assume implementation from memory when the actual repository code can establish the truth.
+READ-ONLY:
+- EVERY OTHER FILE in the repository.
 
-IMPORTANT WORKING RULES
-1. GitHub repository code is the implementation source of truth.
-2. Existing code beats old conversation assumptions unless the user explicitly overrides it.
-3. Do not hallucinate files, classes, methods, routes, database fields, or completed features.
-4. Inspect actual repository code before making implementation claims.
-5. Do not get ahead of the user's requested task.
-6. When changing code, the user's preference is complete replacement files with exact paths, not small manual patches. HOWEVER, under the current GitHub rule the assistant cannot write those code files directly; only my_memory.txt is writable.
-7. Keep architecture clean, WordPress-standard, secure, extensible, and hook-friendly.
-8. This file is a recovery aid, not a substitute for inspecting actual code when implementation details matter.
+The assistant MUST NOT create, modify, overwrite, delete, commit changes to, or otherwise alter any repository file except my_memory.txt.
 
-PRODUCT
-Name: DropKey WP
-Type: WordPress plugin for digital product subscriptions and licensing.
-Core direction: clean WordPress-standard implementation with action/filter hooks and an extensible architecture.
+Other repository files may be inspected/read when necessary to understand the implementation.
 
-KNOWN ARCHITECTURE / REPOSITORY STATE
-The repository had a substantial implementation already present when last inspected. The known structure included:
+If the user later explicitly changes this rule, follow the newer explicit rule.
 
+==================================================
+3. CORE ANTI-HALLUCINATION RULES
+==================================================
+1. The actual GitHub repository is the implementation source of truth.
+2. Existing code beats old conversation memory unless the user explicitly overrides it.
+3. Never invent files, classes, methods, routes, database fields, UI behavior, completed features, or test results.
+4. Inspect actual repository files before making implementation claims when the detail matters.
+5. Do not get ahead of the user's requested task or phase.
+6. If something is not confirmed, label it UNKNOWN or REVIEW TARGET instead of guessing.
+7. Preserve existing working behavior unless there is a demonstrated reason to change it.
+8. For code changes, the user's preferred deliverable is a complete replacement file with the exact project path, not a small manual patch. However, under the current GitHub permission rule, the assistant cannot directly write those code files; only my_memory.txt can be written.
+9. Code should remain clean, WordPress-standard, secure, maintainable, extensible, and hook-friendly.
+10. Before a significant milestone, update this file so the project can be recovered accurately.
+
+==================================================
+4. PRODUCT / PROJECT
+==================================================
+Product: DropKey WP
+
+Purpose:
+A WordPress plugin for digital product subscriptions and licensing.
+
+Original direction:
+- clean WordPress-standard coding
+- extensible architecture
+- action/filter hooks
+- subscription and entitlement management
+- licensing
+- payment gateway abstraction
+- PayPal integration
+- REST/API support
+- WordPress admin management
+- test/diagnostic console
+
+==================================================
+5. ESTABLISHED HIGH-LEVEL ARCHITECTURE
+==================================================
+Known architecture:
+
+WordPress plugin bootstrap
+→ Core Plugin
+→ Application use cases
+→ Domain entities/value concepts
+→ Repositories/database persistence
+→ REST / Frontend / Admin interfaces
+→ Payment Gateway abstraction
+→ PayPal implementation
+→ Payment/webhook processing
+→ Subscription entitlement synchronization
+→ License lifecycle
+
+Known architectural layers:
+- Root/plugin bootstrap
+- Core
+- Domain
+- Application
+- Database/repositories
+- REST
+- Frontend
+- Admin
+- Gateways
+
+==================================================
+6. CONFIRMED REPOSITORY STRUCTURE
+==================================================
 Root:
-- dropkey-wp.php
-- dropkey-audit.txt
-- New Text Document.txt
 - .gitignore
+- New Text Document.txt
+- dropkey-audit.txt
+- dropkey-wp.php
 - my_memory.txt
 
 Admin:
@@ -114,104 +181,309 @@ REST:
 - LicenseController.php
 - WebhookController.php
 
-ARCHITECTURAL MODEL
-Known high-level flow:
-WordPress plugin bootstrap
-→ Core Plugin
-→ Application use cases
-→ Domain entities/value concepts
-→ Repository/database persistence
-→ REST / frontend / admin interfaces
-→ Payment Gateway abstraction
-→ PayPal implementation
-→ Subscription entitlement synchronization
-→ License activation/validation/deactivation
+IMPORTANT:
+The above is the last confirmed tree snapshot. Do not treat it as proof that no additional files now exist. Inspect the current repository when a current file list is required.
 
-KNOWN APPLICATION RESPONSIBILITIES
-The application layer contains use cases for:
-- products
-- plans
-- customers
-- subscriptions
+==================================================
+7. CONFIRMED APPLICATION / DOMAIN CAPABILITIES
+==================================================
+Known application use cases include:
+- create/update products
+- activate/deactivate product status
+- create/update plans
+- activate/deactivate plan status
+- create customers
+- create subscriptions
+- change subscription status
 - subscription checkout
-- subscription status
-- payment events
-- entitlement synchronization
-- licenses
-- license activation/authentication/validation/deactivation
-- past-due subscription enforcement
+- process payment events
+- synchronize subscription entitlement
+- enforce past-due subscriptions
+- create licenses
+- activate licenses
+- authenticate activations
+- validate licenses
+- deactivate licenses
 
-KNOWN ADMIN SURFACES
-Admin classes exist for:
-- plans
-- products
-- subscriptions
+Known domain concepts include:
+- Product
+- ProductType
+- ProductStatus
+- Plan
+- PlanStatus
+- BillingInterval
+- Customer
+- Subscription
+- License
+- Activation
+- GatewayEvent
+- GatewayMapping
+
+==================================================
+8. CONFIRMED PAYMENT / PAYPAL PROGRESS
+==================================================
+CONFIRMED:
+- PayPal Sandbox OAuth authentication succeeded.
+- PayPal gateway credentials/environment were working during testing.
+- PayPalGateway was implemented to create subscription checkout.
+- create_subscription_checkout() returns the PayPal subscription ID, approval URL, status, and provider response.
+- Public product/plan creation through PayPal was removed/avoided; PayPal gateway retained provider-side retrieval/cancellation/webhook parsing responsibilities.
+- Payment gateway abstraction remains through PaymentGatewayInterface and GatewayManager.
+- PayPal is the currently confirmed concrete gateway.
+
+Do NOT assume production PayPal readiness merely because sandbox authentication and tests worked.
+
+==================================================
+9. CONFIRMED REST/API PROGRESS
+==================================================
+Confirmed REST routes from prior project work:
+
+POST /wp-json/dropkey-wp/v1/checkout/subscription
+POST /wp-json/dropkey-wp/v1/webhooks/{gateway}
+
+Confirmed checkout behavior from prior testing/context:
+- checkout requires authentication
+- checkout uses Customer #1 ownership by WordPress User #2 in the tested environment
+
+These exact test-account relationships are test-environment facts, not a general product rule unless actual code confirms otherwise.
+
+==================================================
+10. CONFIRMED SUBSCRIPTION / PAYMENT TEST RESULT
+==================================================
+A renewal simulation for Subscription #14 was successfully processed.
+
+Confirmed resulting state from the test:
+- status: active
+- previous/current renewal period advanced to:
+  2026-11-03 10:00:00 → 2026-12-03 10:00:00
+- PayPal subscription ID:
+  I-7D03DB2WJ2J3
+
+This is an important confirmed integration milestone:
+PayPal renewal simulation → payment event processing → subscription persistence/state update worked in the tested scenario.
+
+Do not generalize this one successful test into proof that every webhook/event/state edge case is correct. Those still require verification.
+
+==================================================
+11. CONFIRMED ADMIN PROGRESS — SUBSCRIPTIONS
+==================================================
+SubscriptionAdmin.php is an important current admin surface.
+
+User explicitly established:
+- The last-known-working SubscriptionAdmin.php is the source of truth for the current subscription admin implementation.
+- When styling work is requested, preserve the constructor, methods, hooks, repository calls, routes, forms, and HTML structure unless the user explicitly asks for functional changes.
+
+Recent work was specifically UI/CSS styling on the subscription detail page.
+
+Current styling target:
+- subscription detail sidebar postbox headers
+- Lifecycle table
+- IDs table
+
+User-reported UI problems being addressed:
+- header title padding
+- cramped sidebar table columns
+
+The latest repository commits immediately before the memory-file work included multiple "updated dropkey wp" commits, with the most recent prior implementation commit being:
+85faaa4b94ba4ca5bfce1f586c1454ff746ede65
+(commit message: "updated dropkey wp")
+
+Important:
+Do not claim the final styling is perfect/approved unless the user explicitly confirms it.
+
+==================================================
+12. RECENT GITHUB HISTORY / MILESTONES
+==================================================
+Known repository history includes:
+- 63d6a5f131c3da458f245461f1b14e4adf289f52 — Initial DropKey WP project
+- followed by a series of implementation commits with generic message "updated dropkey wp"
+- PayPal and subscription implementation/testing progressed during 2026-10-03
+- 85faaa4b94ba4ca5bfce1f586c1454ff746ede65 — most recent implementation commit before creation of this memory file
+- f8f9f41fc3cce6ad80918fbf7e22fd457f98e8e3 — created my_memory.txt
+- 8eafc4a16956951646e8998b79382b910f4b38e3 — populated this recovery memory file
+
+Do not infer exact changes from generic commit messages alone. Read the actual files or commit diffs when exact historical changes are needed.
+
+==================================================
+13. WHAT HAS BEEN ACCOMPLISHED OVERALL
+==================================================
+The project has moved well beyond an initial architecture/prototype.
+
+Confirmed broad implementation areas now exist:
+- WordPress plugin bootstrap/core
+- domain model
+- application/use-case layer
+- database schema/installer
+- repositories
+- product and plan management
+- customer handling
+- subscription handling
+- licensing
+- activation lifecycle
+- REST checkout/webhook endpoints
+- frontend checkout surface
+- admin management screens
+- payment gateway abstraction
+- PayPal integration
+- entitlement synchronization
+- payment event processing
+- past-due enforcement
 - test console
 
-KNOWN GATEWAY DIRECTION
-Payment gateways are abstracted through PaymentGatewayInterface and GatewayManager.
-PayPal is the currently known concrete gateway.
-Do not assume additional gateways exist unless actual repository inspection confirms them.
+The project has also reached real integration testing:
+- PayPal sandbox authentication succeeded.
+- Subscription checkout/payment flow has been exercised.
+- A renewal simulation for Subscription #14 successfully updated persisted subscription state and billing period.
 
-KNOWN DATABASE DIRECTION
-Repositories exist for:
-- customers
-- products/plans
-- subscriptions
-- licenses
-- activations
-- gateway events
-- gateway mappings
-Schema and installation are centralized in Database/Schema.php and Database/Installer.php.
+Therefore, the project is currently in an IMPLEMENTATION + INTEGRATION VERIFICATION / POLISH stage, not an initial design stage.
 
-CURRENT PROJECT PHASE / PROGRESS
-The project is beyond initial architecture and already has a broad implementation across domain, application, persistence, REST, admin, frontend, and PayPal gateway areas.
+==================================================
+14. CURRENT STATUS RIGHT NOW
+==================================================
+As of 2026-10-04:
 
-The next meaningful project activity identified before this file was created was NOT blind feature expansion. The recommended direction was an audit/verification/hardening pass across the existing implementation.
+CURRENT WORK AREA:
+Subscription admin UI.
 
-AUDIT / VERIFICATION AREAS TO REVIEW
-When the user asks to continue project work, the likely verification sequence is:
+CURRENT SUBTASK / RECENT FOCUS:
+CSS/layout polishing on the subscription detail sidebar, specifically:
+- postbox header title spacing/padding
+- Lifecycle table column spacing
+- IDs table column spacing
+
+CURRENT SOURCE OF TRUTH FOR THIS AREA:
+The last-known-working SubscriptionAdmin.php implementation, especially its functional structure.
+
+CURRENT GITHUB ACCESS:
+Only my_memory.txt is writable. All other files are read-only.
+
+CURRENT PROJECT STATE:
+Core implementation exists and has passed meaningful PayPal/subscription integration testing, while admin UI polish and broader verification/hardening remain ongoing.
+
+IMPORTANT:
+The next task should come from the user's explicit request. Do not automatically jump into the larger audit/hardening plan unless the user asks to continue that work.
+
+==================================================
+15. NEXT WORK — PLANNED, NOT YET COMPLETED
+==================================================
+A broader verification/hardening pass was identified as the logical next major project phase after current implementation/polish.
+
+Potential verification sequence:
 1. Domain → Application → Repository flow.
 2. Application → REST/Admin integration.
-3. Subscription lifecycle and state transitions.
+3. Subscription lifecycle/state transitions.
 4. Entitlement synchronization.
-5. License creation, activation, authentication, validation, and deactivation.
+5. License creation/activation/authentication/validation/deactivation.
 6. Payment/webhook processing and idempotency.
 7. Past-due subscription handling.
-8. Authorization and WordPress capabilities/nonces.
+8. Authorization, capabilities, nonces, and permissions.
 9. Database consistency and error handling.
-10. Security and input validation/sanitization/escaping.
+10. Input validation, sanitization, escaping, and security.
 11. WordPress coding standards.
-12. Action/filter hook and extensibility quality.
-13. Agreement between admin UI, application use cases, and persisted state.
-14. Edge cases around repeated events, repeated activation/deactivation, expired/voided/inactive states, and inconsistent gateway mappings.
+12. Action/filter hook quality and extensibility.
+13. Admin/application/persistence agreement.
+14. Repeated payment events and webhook idempotency.
+15. Repeated activation/deactivation and other lifecycle edge cases.
+16. Expired/voided/inactive states.
+17. Gateway mapping consistency.
 
-IMPORTANT: These are REVIEW TARGETS, not claims that the above areas are currently broken or complete. Actual files must establish the facts.
+These are REVIEW TARGETS, not known bugs.
+Do not state that they are broken or complete until actual code/testing establishes that.
 
-USER EXPECTATIONS
-- User wants the assistant to act as a capable project pilot and make reasonable architectural decisions when the direction is clear.
-- At the same time, the assistant must not get ahead of the explicitly requested phase/task.
-- User strongly dislikes hallucination or claims based on assumed implementation.
-- If uncertain, inspect the allowed repository content when appropriate, or state the uncertainty.
-- Prefer clean, optimized solutions and avoid unnecessary dependencies.
-- Preserve existing architecture unless there is a demonstrated reason to change it.
+==================================================
+16. CONFIRMED VS UNKNOWN
+==================================================
+CONFIRMED:
+- Product is named DropKey WP.
+- Repository is ruelporlas/dropkey-wp.
+- main is the working branch referenced in this project.
+- Only my_memory.txt is writable by the assistant.
+- The repository has the broad architecture listed above.
+- PayPal sandbox OAuth succeeded.
+- Subscription checkout/payment work has been exercised.
+- Subscription #14 renewal simulation succeeded with the recorded active period and PayPal ID.
+- REST checkout/webhook routes listed above were confirmed.
+- SubscriptionAdmin styling work recently focused on sidebar postbox headers, Lifecycle, and IDs tables.
+- Last-known-working SubscriptionAdmin.php is the source of truth for preserving functional behavior during styling work.
 
-RECOVERY PROTOCOL
-If context is lost:
-1. Read my_memory.txt first.
-2. Treat the CRITICAL GITHUB ACCESS RULE as binding.
-3. Do not write any repository file other than my_memory.txt.
-4. Use the memory above to reconstruct project direction and known progress.
-5. For implementation questions, inspect actual repository files as needed, but never modify them under the current rule.
-6. Distinguish clearly between:
-   - CONFIRMED: established by actual repository inspection or explicit user decision.
-   - PROJECT DIRECTION: agreed/intended architecture.
-   - REVIEW TARGET: something that still needs verification.
-   - UNKNOWN: do not guess.
-7. Before major project milestones, update this file with the current state so it remains useful as a recovery point.
+UNKNOWN / MUST VERIFY:
+- Exact implementation details not recorded in this file.
+- Exact contents of any repository file at the current moment.
+- Exact state of every UI styling issue.
+- Whether every lifecycle transition is correct.
+- Whether webhook handling is fully idempotent across all event types.
+- Whether all security/capability/nonce concerns are fully satisfied.
+- Production PayPal readiness.
+- Any feature not explicitly confirmed above.
 
-MEMORY MAINTENANCE RULE
-Whenever the assistant is explicitly asked to record/update project progress, or after a significant confirmed project decision/milestone, update this file. Keep entries factual and concise enough to scan quickly. Never use this file to invent implementation details.
+==================================================
+17. RECOVERY PROTOCOL FOR FUTURE ASSISTANT SESSIONS
+==================================================
+When DropKey WP context is missing or uncertain:
 
-CURRENT CONFIRMED SPECIAL RULE
-The user explicitly authorized the assistant to freely read and write my_memory.txt without asking for permission each time. This permission applies ONLY to my_memory.txt.
+STEP 1
+Read my_memory.txt first.
+
+STEP 2
+Re-establish the GitHub permission boundary:
+- my_memory.txt = read/write
+- everything else = read-only
+
+STEP 3
+Read the user's current request carefully.
+Do not continue an old task merely because it appears in this file.
+
+STEP 4
+Use this file to understand:
+- project direction
+- completed milestones
+- current status
+- known decisions
+- known test results
+
+STEP 5
+If an implementation claim is needed, inspect the actual repository file(s). Do not rely on memory alone.
+
+STEP 6
+Classify information:
+- CONFIRMED = directly established by repository inspection, actual testing, or explicit user decision.
+- PROJECT DIRECTION = intended/agreed architecture.
+- REVIEW TARGET = planned verification, not a known defect.
+- UNKNOWN = do not guess.
+
+STEP 7
+If a significant milestone is completed, update my_memory.txt immediately.
+
+STEP 8
+Never modify any repository file other than my_memory.txt under the current rule.
+
+==================================================
+18. MEMORY MAINTENANCE RULE
+==================================================
+Update this file when:
+- the user explicitly asks to record progress
+- a significant implementation milestone is confirmed
+- a significant test succeeds/fails
+- an important architecture decision is made
+- the current task/status changes materially
+- a known issue is resolved
+- a new constraint is established
+
+Keep entries factual and concise enough to scan.
+
+Never turn assumptions, proposed work, or review targets into confirmed facts.
+
+==================================================
+19. CURRENT RECOVERY SNAPSHOT
+==================================================
+If everything else is forgotten, remember this:
+
+DropKey WP is an existing WordPress subscription/licensing plugin with a layered architecture and PayPal integration. PayPal sandbox authentication succeeded, and a Subscription #14 renewal simulation successfully persisted an active renewal period of 2026-11-03 10:00:00 through 2026-12-03 10:00:00 for PayPal subscription I-7D03DB2WJ2J3.
+
+The most recent project work was SubscriptionAdmin UI styling, with attention on sidebar postbox header padding and Lifecycle/IDs table column spacing. The last-known-working SubscriptionAdmin.php is the functional source of truth for that area.
+
+The immediate project state is implementation/integration verification plus UI polish. Do not jump ahead without the user's instruction.
+
+GitHub rule: ONLY my_memory.txt may be written. All other repository files are READ-ONLY.
+
+END OF RECOVERY FILE
