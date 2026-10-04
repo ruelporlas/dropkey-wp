@@ -24,6 +24,8 @@ final class PayPalGateway implements PaymentGatewayInterface {
 
 	private const WEBHOOK_TIMESTAMP_TOLERANCE = 300;
 
+	private const RESOURCE_LOCK_TIMEOUT = 10;
+
 	private $client_id;
 
 	private $client_secret;
@@ -243,79 +245,129 @@ final class PayPalGateway implements PaymentGatewayInterface {
 			}
 		}
 
-		$name        = $product->get_name();
-		$description = '';
+		$lock_name = 'dropkey_paypal_product_' . absint( $product_id );
 
-		if ( method_exists( $product, 'get_description' ) ) {
-			$description = wp_strip_all_tags(
-				(string) $product->get_description()
+		$lock = $this->acquire_resource_lock( $lock_name );
+
+		if ( is_wp_error( $lock ) ) {
+			return $lock;
+		}
+
+		try {
+			/*
+			 * Re-check the mapping after acquiring the lock. Another request
+			 * may have created the provider resource while this request was
+			 * waiting for ownership.
+			 */
+			$mapping = $this->mappings->find_by_entity(
+				self::GATEWAY_ID,
+				'product',
+				$product_id
 			);
-		}
 
-		$payload = array(
-			'name'        => $this->truncate( $name, 127 ),
-			'type'        => 'SERVICE',
-			'category'    => 'SOFTWARE',
-			'description' => $this->truncate(
-				'' !== $description ? $description : $name,
-				256
-			),
-		);
+			if ( $mapping ) {
+				$external_id = $mapping->get_external_id();
 
-		$result = $this->request(
-			'POST',
-			'/v1/catalogs/products',
-			$payload,
-			array(
-				'PayPal-Request-Id' => $this->generate_request_id(),
-				'Prefer'            => 'return=representation',
-			)
-		);
+				if ( '' !== $external_id ) {
+					return $external_id;
+				}
+			}
 
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
+			$name        = $product->get_name();
+			$description = '';
 
-		$external_id = isset( $result['id'] )
-			? sanitize_text_field( $result['id'] )
-			: '';
+			if ( method_exists( $product, 'get_description' ) ) {
+				$description = wp_strip_all_tags(
+					(string) $product->get_description()
+				);
+			}
 
-		if ( '' === $external_id ) {
-			return new \WP_Error(
-				'dropkey_paypal_product_id_missing',
-				__( 'PayPal did not return a product ID.', 'dropkey-wp' ),
+			$payload = array(
+				'name'        => $this->truncate( $name, 127 ),
+				'type'        => 'SERVICE',
+				'category'    => 'SOFTWARE',
+				'description' => $this->truncate(
+					'' !== $description ? $description : $name,
+					256
+				),
+			);
+
+			$result = $this->request(
+				'POST',
+				'/v1/catalogs/products',
+				$payload,
 				array(
-					'provider_response' => $result,
+					'PayPal-Request-Id' => $this->generate_request_id(),
+					'Prefer'            => 'return=representation',
 				)
 			);
+
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+
+			$external_id = isset( $result['id'] )
+				? sanitize_text_field( $result['id'] )
+				: '';
+
+			if ( '' === $external_id ) {
+				return new \WP_Error(
+					'dropkey_paypal_product_id_missing',
+					__( 'PayPal did not return a product ID.', 'dropkey-wp' ),
+					array(
+						'provider_response' => $result,
+					)
+				);
+			}
+
+			$mapping_result = $this->mappings->create(
+				array(
+					'gateway'       => self::GATEWAY_ID,
+					'entity_type'   => 'product',
+					'entity_id'     => $product_id,
+					'external_type' => 'product',
+					'external_id'   => $external_id,
+					'metadata'      => array(
+						'name' => $name,
+					),
+				)
+			);
+
+			if ( is_wp_error( $mapping_result ) ) {
+				/*
+				 * Recover if the mapping already exists. This protects the
+				 * resolution layer from turning a mapping race into a
+				 * checkout failure.
+				 */
+				$existing_mapping = $this->mappings->find_by_entity(
+					self::GATEWAY_ID,
+					'product',
+					$product_id
+				);
+
+				if ( $existing_mapping ) {
+					$existing_external_id = $existing_mapping->get_external_id();
+
+					if ( '' !== $existing_external_id ) {
+						return $existing_external_id;
+					}
+				}
+
+				return $mapping_result;
+			}
+
+			do_action(
+				'dropkey_wp_gateway_product_created',
+				$product,
+				self::GATEWAY_ID,
+				$external_id,
+				$result
+			);
+
+			return $external_id;
+		} finally {
+			$this->release_resource_lock( $lock_name );
 		}
-
-		$mapping_result = $this->mappings->create(
-			array(
-				'gateway'       => self::GATEWAY_ID,
-				'entity_type'   => 'product',
-				'entity_id'     => $product_id,
-				'external_type' => 'product',
-				'external_id'   => $external_id,
-				'metadata'      => array(
-					'name' => $name,
-				),
-			)
-		);
-
-		if ( is_wp_error( $mapping_result ) ) {
-			return $mapping_result;
-		}
-
-		do_action(
-			'dropkey_wp_gateway_product_created',
-			$product,
-			self::GATEWAY_ID,
-			$external_id,
-			$result
-		);
-
-		return $external_id;
 	}
 
 	private function resolve_plan( $plan, $paypal_product_id, array $context ) {
@@ -335,163 +387,211 @@ final class PayPalGateway implements PaymentGatewayInterface {
 			}
 		}
 
-		$interval_unit = strtolower(
-			(string) $plan->get_billing_interval()
-		);
+		$lock_name = 'dropkey_paypal_plan_' . absint( $plan_id );
 
-		$interval_count = absint(
-			$plan->get_billing_interval_count()
-		);
+		$lock = $this->acquire_resource_lock( $lock_name );
 
-		$interval_map = array(
-			'day'    => 'DAY',
-			'days'   => 'DAY',
-			'week'   => 'WEEK',
-			'weeks'  => 'WEEK',
-			'month'  => 'MONTH',
-			'months' => 'MONTH',
-			'year'   => 'YEAR',
-			'years'  => 'YEAR',
-		);
-
-		if ( isset( $interval_map[ $interval_unit ] ) ) {
-			$interval_unit = $interval_map[ $interval_unit ];
-		} else {
-			$interval_unit = strtoupper( $interval_unit );
+		if ( is_wp_error( $lock ) ) {
+			return $lock;
 		}
 
-		if ( $interval_count < 1 ) {
-			$interval_count = 1;
-		}
-
-		$name        = $plan->get_name();
-		$description = '';
-
-		if ( method_exists( $plan, 'get_description' ) ) {
-			$description = wp_strip_all_tags(
-				(string) $plan->get_description()
+		try {
+			/*
+			 * Re-check the mapping after acquiring the lock.
+			 */
+			$mapping = $this->mappings->find_by_entity(
+				self::GATEWAY_ID,
+				'plan',
+				$plan_id
 			);
-		}
 
-		$price = number_format(
-			(float) $plan->get_price(),
-			2,
-			'.',
-			''
-		);
+			if ( $mapping ) {
+				$external_id = $mapping->get_external_id();
 
-		$currency = strtoupper(
-			(string) $plan->get_currency()
-		);
+				if ( '' !== $external_id ) {
+					return $external_id;
+				}
+			}
 
-		$payload = array(
-			'product_id'          => $paypal_product_id,
-			'name'                => $this->truncate( $name, 127 ),
-			'description'         => $this->truncate(
-				'' !== $description ? $description : $name,
-				127
-			),
-			'status'              => 'ACTIVE',
-			'billing_cycles'      => array(
-				array(
-					'frequency' => array(
-						'interval_unit'  => $interval_unit,
-						'interval_count' => $interval_count,
-					),
-					'tenure_type'    => 'REGULAR',
-					'sequence'       => 1,
-					'total_cycles'   => 0,
-					'pricing_scheme' => array(
-						'fixed_price' => array(
-							'value'         => $price,
-							'currency_code' => $currency,
+			$interval_unit = strtolower(
+				(string) $plan->get_billing_interval()
+			);
+
+			$interval_count = absint(
+				$plan->get_billing_interval_count()
+			);
+
+			$interval_map = array(
+				'day'    => 'DAY',
+				'days'   => 'DAY',
+				'week'   => 'WEEK',
+				'weeks'  => 'WEEK',
+				'month'  => 'MONTH',
+				'months' => 'MONTH',
+				'year'   => 'YEAR',
+				'years'  => 'YEAR',
+			);
+
+			if ( isset( $interval_map[ $interval_unit ] ) ) {
+				$interval_unit = $interval_map[ $interval_unit ];
+			} else {
+				$interval_unit = strtoupper( $interval_unit );
+			}
+
+			if ( $interval_count < 1 ) {
+				$interval_count = 1;
+			}
+
+			$name        = $plan->get_name();
+			$description = '';
+
+			if ( method_exists( $plan, 'get_description' ) ) {
+				$description = wp_strip_all_tags(
+					(string) $plan->get_description()
+				);
+			}
+
+			$price = number_format(
+				(float) $plan->get_price(),
+				2,
+				'.',
+				''
+			);
+
+			$currency = strtoupper(
+				(string) $plan->get_currency()
+			);
+
+			$payload = array(
+				'product_id'          => $paypal_product_id,
+				'name'                => $this->truncate( $name, 127 ),
+				'description'         => $this->truncate(
+					'' !== $description ? $description : $name,
+					127
+				),
+				'status'              => 'ACTIVE',
+				'billing_cycles'      => array(
+					array(
+						'frequency' => array(
+							'interval_unit'  => $interval_unit,
+							'interval_count' => $interval_count,
+						),
+						'tenure_type'    => 'REGULAR',
+						'sequence'       => 1,
+						'total_cycles'   => 0,
+						'pricing_scheme' => array(
+							'fixed_price' => array(
+								'value'         => $price,
+								'currency_code' => $currency,
+							),
 						),
 					),
 				),
-			),
-			'payment_preferences' => array(
-				'auto_bill_outstanding'     => true,
-				'payment_failure_threshold' => 1,
-			),
-		);
-
-		$result = $this->request(
-			'POST',
-			'/v1/billing/plans',
-			$payload,
-			array(
-				'PayPal-Request-Id' => $this->generate_request_id(),
-			)
-		);
-
-		if ( is_wp_error( $result ) ) {
-			return $result;
-		}
-
-		$external_id = isset( $result['id'] )
-			? sanitize_text_field( $result['id'] )
-			: '';
-
-		if ( '' === $external_id ) {
-			return new \WP_Error(
-				'dropkey_paypal_plan_id_missing',
-				__( 'PayPal did not return a billing plan ID.', 'dropkey-wp' ),
-				array(
-					'provider_response' => $result,
-				)
+				'payment_preferences' => array(
+					'auto_bill_outstanding'     => true,
+					'payment_failure_threshold' => 1,
+				),
 			);
-		}
 
-		$status = isset( $result['status'] )
-			? strtoupper( $result['status'] )
-			: '';
-
-		if ( 'ACTIVE' !== $status ) {
-			$activation = $this->request(
+			$result = $this->request(
 				'POST',
-				'/v1/billing/plans/' . rawurlencode( $external_id ) . '/activate',
-				array(),
+				'/v1/billing/plans',
+				$payload,
 				array(
 					'PayPal-Request-Id' => $this->generate_request_id(),
 				)
 			);
 
-			if ( is_wp_error( $activation ) ) {
-				return $activation;
+			if ( is_wp_error( $result ) ) {
+				return $result;
 			}
+
+			$external_id = isset( $result['id'] )
+				? sanitize_text_field( $result['id'] )
+				: '';
+
+			if ( '' === $external_id ) {
+				return new \WP_Error(
+					'dropkey_paypal_plan_id_missing',
+					__( 'PayPal did not return a billing plan ID.', 'dropkey-wp' ),
+					array(
+						'provider_response' => $result,
+					)
+				);
+			}
+
+			$status = isset( $result['status'] )
+				? strtoupper( $result['status'] )
+				: '';
+
+			if ( 'ACTIVE' !== $status ) {
+				$activation = $this->request(
+					'POST',
+					'/v1/billing/plans/' . rawurlencode( $external_id ) . '/activate',
+					array(),
+					array(
+						'PayPal-Request-Id' => $this->generate_request_id(),
+					)
+				);
+
+				if ( is_wp_error( $activation ) ) {
+					return $activation;
+				}
+			}
+
+			$mapping_result = $this->mappings->create(
+				array(
+					'gateway'       => self::GATEWAY_ID,
+					'entity_type'   => 'plan',
+					'entity_id'     => $plan_id,
+					'external_type' => 'plan',
+					'external_id'   => $external_id,
+					'metadata'      => array(
+						'product_external_id'     => $paypal_product_id,
+						'name'                   => $name,
+						'price'                  => $price,
+						'currency'               => $currency,
+						'billing_interval'       => $interval_unit,
+						'billing_interval_count' => $interval_count,
+					),
+				)
+			);
+
+			if ( is_wp_error( $mapping_result ) ) {
+				/*
+				 * Recover if another request has already persisted the
+				 * mapping. The provider resource created by this request
+				 * cannot safely be substituted into the existing mapping.
+				 */
+				$existing_mapping = $this->mappings->find_by_entity(
+					self::GATEWAY_ID,
+					'plan',
+					$plan_id
+				);
+
+				if ( $existing_mapping ) {
+					$existing_external_id = $existing_mapping->get_external_id();
+
+					if ( '' !== $existing_external_id ) {
+						return $existing_external_id;
+					}
+				}
+
+				return $mapping_result;
+			}
+
+			do_action(
+				'dropkey_wp_gateway_plan_created',
+				$plan,
+				self::GATEWAY_ID,
+				$external_id,
+				$result
+			);
+
+			return $external_id;
+		} finally {
+			$this->release_resource_lock( $lock_name );
 		}
-
-		$mapping_result = $this->mappings->create(
-			array(
-				'gateway'       => self::GATEWAY_ID,
-				'entity_type'   => 'plan',
-				'entity_id'     => $plan_id,
-				'external_type' => 'plan',
-				'external_id'   => $external_id,
-				'metadata'      => array(
-					'product_external_id'     => $paypal_product_id,
-					'name'                   => $name,
-					'price'                  => $price,
-					'currency'               => $currency,
-					'billing_interval'       => $interval_unit,
-					'billing_interval_count' => $interval_count,
-				),
-			)
-		);
-
-		if ( is_wp_error( $mapping_result ) ) {
-			return $mapping_result;
-		}
-
-		do_action(
-			'dropkey_wp_gateway_plan_created',
-			$plan,
-			self::GATEWAY_ID,
-			$external_id,
-			$result
-		);
-
-		return $external_id;
 	}
 
 	public function get_subscription( $gateway_subscription_id ) {
@@ -634,10 +734,7 @@ final class PayPalGateway implements PaymentGatewayInterface {
 	/**
 	 * Verify a PayPal webhook signature using the raw payload.
 	 *
-	 * PayPal's REST webhook documentation requires the original raw
-	 * request body when calculating the CRC32 value.
-	 *
-	 * @param string $payload Raw webhook body.
+	 * @param string $payload Raw payload.
 	 * @param array  $headers Request headers.
 	 * @return true|WP_Error
 	 */
@@ -1164,6 +1261,53 @@ final class PayPalGateway implements PaymentGatewayInterface {
 
 	private function generate_request_id() {
 		return wp_generate_uuid4();
+	}
+
+	/**
+	 * Acquire a MySQL advisory lock for PayPal resource provisioning.
+	 *
+	 * @param string $lock_name Advisory lock name.
+	 * @return true|WP_Error
+	 */
+	private function acquire_resource_lock( $lock_name ) {
+		global $wpdb;
+
+		$result = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT GET_LOCK(%s, %d)',
+				$lock_name,
+				self::RESOURCE_LOCK_TIMEOUT
+			)
+		);
+
+		if ( '1' === (string) $result ) {
+			return true;
+		}
+
+		return new \WP_Error(
+			'dropkey_paypal_resource_lock_failed',
+			__(
+				'PayPal resource provisioning is currently locked. Please try again.',
+				'dropkey-wp'
+			)
+		);
+	}
+
+	/**
+	 * Release a MySQL advisory lock for PayPal resource provisioning.
+	 *
+	 * @param string $lock_name Advisory lock name.
+	 * @return void
+	 */
+	private function release_resource_lock( $lock_name ) {
+		global $wpdb;
+
+		$wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT RELEASE_LOCK(%s)',
+				$lock_name
+			)
+		);
 	}
 
 	private function create_api_error(

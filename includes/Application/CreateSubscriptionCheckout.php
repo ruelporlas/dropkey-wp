@@ -132,7 +132,10 @@ final class CreateSubscriptionCheckout {
 		if ( $plan->get_product_id() !== $product->get_id() ) {
 			return new \WP_Error(
 				'dropkey_checkout_product_plan_mismatch',
-				__( 'The selected plan does not belong to the selected product.', 'dropkey-wp' )
+				__(
+					'The selected plan does not belong to the selected product.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -148,7 +151,10 @@ final class CreateSubscriptionCheckout {
 		if ( ! $gateway->is_available() ) {
 			return new \WP_Error(
 				'dropkey_checkout_gateway_unavailable',
-				__( 'The selected payment gateway is not currently available.', 'dropkey-wp' )
+				__(
+					'The selected payment gateway is not currently available.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -183,7 +189,10 @@ final class CreateSubscriptionCheckout {
 		if ( ! is_array( $result ) ) {
 			return new \WP_Error(
 				'dropkey_checkout_invalid_gateway_response',
-				__( 'The payment gateway returned an invalid checkout response.', 'dropkey-wp' )
+				__(
+					'The payment gateway returned an invalid checkout response.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -194,7 +203,10 @@ final class CreateSubscriptionCheckout {
 		if ( '' === $gateway_subscription_id ) {
 			return new \WP_Error(
 				'dropkey_checkout_gateway_subscription_missing',
-				__( 'The payment gateway did not return a subscription ID.', 'dropkey-wp' )
+				__(
+					'The payment gateway did not return a subscription ID.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -237,6 +249,13 @@ final class CreateSubscriptionCheckout {
 		$validation = $subscription->validate();
 
 		if ( is_wp_error( $validation ) ) {
+			$this->compensate_gateway_subscription(
+				$gateway,
+				$gateway_subscription_id,
+				$validation,
+				$gateway_id
+			);
+
 			return $validation;
 		}
 
@@ -258,6 +277,43 @@ final class CreateSubscriptionCheckout {
 		);
 
 		if ( is_wp_error( $created_subscription ) ) {
+			/*
+			 * A concurrent request may have successfully created the
+			 * same local subscription between our initial lookup and
+			 * this insert. Recover the winner before compensating the
+			 * provider subscription.
+			 */
+			$existing_subscription = $this->subscriptions->find_by_gateway_subscription_id(
+				$gateway_id,
+				$gateway_subscription_id
+			);
+
+			if ( $existing_subscription ) {
+				$result['gateway']            = $gateway_id;
+				$result['subscription_id']    = $existing_subscription->get_id();
+				$result['local_subscription'] = $existing_subscription;
+
+				do_action(
+					'dropkey_wp_subscription_checkout_created',
+					$result,
+					$existing_subscription
+				);
+
+				return $result;
+			}
+
+			/*
+			 * The provider resource now exists, but local persistence
+			 * failed. Attempt to cancel the provider subscription so
+			 * it cannot continue into a billable orphaned state.
+			 */
+			$this->compensate_gateway_subscription(
+				$gateway,
+				$gateway_subscription_id,
+				$created_subscription,
+				$gateway_id
+			);
+
 			do_action(
 				'dropkey_wp_subscription_checkout_local_creation_failed',
 				$result,
@@ -280,6 +336,109 @@ final class CreateSubscriptionCheckout {
 		);
 
 		return $result;
+	}
+
+	/**
+	 * Attempt to compensate for a provider subscription when local
+	 * subscription persistence cannot be completed.
+	 *
+	 * @param object    $gateway                  Payment gateway.
+	 * @param string    $gateway_subscription_id Provider subscription ID.
+	 * @param \WP_Error $local_error             Local persistence error.
+	 * @param string    $gateway_id              Gateway ID.
+	 * @return void
+	 */
+	private function compensate_gateway_subscription(
+		$gateway,
+		$gateway_subscription_id,
+		\WP_Error $local_error,
+		$gateway_id
+	) {
+		if (
+			! is_object( $gateway )
+			|| ! method_exists( $gateway, 'cancel_subscription' )
+		) {
+			$error = new \WP_Error(
+				'dropkey_checkout_compensation_unavailable',
+				__(
+					'The payment gateway does not support subscription cancellation.',
+					'dropkey-wp'
+				)
+			);
+
+			$this->record_compensation_failure(
+				$gateway_id,
+				$gateway_subscription_id,
+				$local_error,
+				$error
+			);
+
+			return;
+		}
+
+		$cancel_result = $gateway->cancel_subscription(
+			$gateway_subscription_id,
+			__(
+				'DropKey WP could not complete local subscription creation.',
+				'dropkey-wp'
+			)
+		);
+
+		if ( is_wp_error( $cancel_result ) ) {
+			$this->record_compensation_failure(
+				$gateway_id,
+				$gateway_subscription_id,
+				$local_error,
+				$cancel_result
+			);
+
+			return;
+		}
+
+		do_action(
+			'dropkey_wp_subscription_checkout_compensated',
+			$gateway_id,
+			$gateway_subscription_id,
+			$local_error
+		);
+	}
+
+	/**
+	 * Record a failed provider compensation attempt.
+	 *
+	 * The local persistence error remains the primary checkout error.
+	 * Compensation failure is separately observable so it can be
+	 * investigated without hiding the original failure.
+	 *
+	 * @param string    $gateway_id              Gateway ID.
+	 * @param string    $gateway_subscription_id Provider subscription ID.
+	 * @param \WP_Error $local_error             Local persistence error.
+	 * @param \WP_Error $compensation_error      Compensation error.
+	 * @return void
+	 */
+	private function record_compensation_failure(
+		$gateway_id,
+		$gateway_subscription_id,
+		\WP_Error $local_error,
+		\WP_Error $compensation_error
+	) {
+		error_log(
+			sprintf(
+				'DropKey WP: Failed to compensate provider subscription %s for gateway %s after local checkout persistence failed. Local error: %s. Compensation error: %s',
+				sanitize_text_field( $gateway_subscription_id ),
+				sanitize_key( $gateway_id ),
+				$local_error->get_error_message(),
+				$compensation_error->get_error_message()
+			)
+		);
+
+		do_action(
+			'dropkey_wp_subscription_checkout_compensation_failed',
+			$gateway_id,
+			$gateway_subscription_id,
+			$local_error,
+			$compensation_error
+		);
 	}
 
 	/**
