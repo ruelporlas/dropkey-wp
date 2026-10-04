@@ -893,35 +893,39 @@ final class SubscriptionAdmin {
 									);
 									?>
 
-									<p>
-										<label
-											for="dropkey_wp_subscription_new_status"
-											class="screen-reader-text"
-										>
-											<?php echo esc_html__( 'New status', 'dropkey-wp' ); ?>
-										</label>
+									<div class="dropkey-wp-subscription-actions">
 
-										<select
-											name="new_status"
-											id="dropkey_wp_subscription_new_status"
-											class="widefat"
-										>
-											<?php foreach ( $allowed_transitions as $new_status ) : ?>
-												<option value="<?php echo esc_attr( $new_status ); ?>">
-													<?php echo esc_html( $this->get_status_label( $new_status ) ); ?>
-												</option>
-											<?php endforeach; ?>
-										</select>
-									</p>
+										<p class="dropkey-wp-subscription-actions-label">
+											<?php echo esc_html__( 'Available actions', 'dropkey-wp' ); ?>
+										</p>
 
-									<p>
-										<button
-											type="submit"
-											class="button button-primary"
-										>
-											<?php echo esc_html__( 'Update Status', 'dropkey-wp' ); ?>
-										</button>
-									</p>
+										<?php foreach ( $allowed_transitions as $new_status ) : ?>
+
+											<?php
+											$action_class = $this->get_status_action_class(
+												$new_status
+											);
+											?>
+
+											<button
+												type="submit"
+												name="new_status"
+												value="<?php echo esc_attr( $new_status ); ?>"
+												class="button dropkey-wp-subscription-action <?php echo esc_attr( $action_class ); ?>"
+											>
+												<?php
+												echo esc_html(
+													$this->get_status_action_label(
+														$subscription->get_status(),
+														$new_status
+													)
+												);
+												?>
+											</button>
+
+										<?php endforeach; ?>
+
+									</div>
 
 								</form>
 
@@ -1245,6 +1249,57 @@ final class SubscriptionAdmin {
 		return isset( $transitions[ $current_status ] )
 			? $transitions[ $current_status ]
 			: array();
+	}
+
+	/**
+	 * Get human-readable subscription lifecycle action label.
+	 *
+	 * @param string $current_status Current subscription status.
+	 * @param string $new_status     Target subscription status.
+	 * @return string
+	 */
+	private function get_status_action_label( $current_status, $new_status ) {
+		if ( Subscription::STATUS_ACTIVE === $new_status ) {
+			if (
+				Subscription::STATUS_PAST_DUE === $current_status
+				|| Subscription::STATUS_SUSPENDED === $current_status
+			) {
+				return __( 'Reactivate', 'dropkey-wp' );
+			}
+
+			return __( 'Activate', 'dropkey-wp' );
+		}
+
+		$labels = array(
+			Subscription::STATUS_PAST_DUE  => __( 'Mark Past Due', 'dropkey-wp' ),
+			Subscription::STATUS_SUSPENDED => __( 'Suspend', 'dropkey-wp' ),
+			Subscription::STATUS_CANCELLED => __( 'Cancel', 'dropkey-wp' ),
+			Subscription::STATUS_EXPIRED   => __( 'Expire', 'dropkey-wp' ),
+		);
+
+		return isset( $labels[ $new_status ] )
+			? $labels[ $new_status ]
+			: $this->get_status_label( $new_status );
+	}
+
+	/**
+	 * Get CSS class for a subscription lifecycle action.
+	 *
+	 * @param string $new_status Target subscription status.
+	 * @return string
+	 */
+	private function get_status_action_class( $new_status ) {
+		switch ( $new_status ) {
+			case Subscription::STATUS_SUSPENDED:
+				return 'dropkey-wp-subscription-action-warning';
+
+			case Subscription::STATUS_CANCELLED:
+			case Subscription::STATUS_EXPIRED:
+				return 'dropkey-wp-subscription-action-danger';
+
+			default:
+				return 'dropkey-wp-subscription-action-primary';
+		}
 	}
 
 	/**
@@ -1712,6 +1767,55 @@ final class SubscriptionAdmin {
 
 			.dropkey-wp-current-status {
 				margin: 0 0 14px;
+			}
+
+			.dropkey-wp-subscription-actions {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			.dropkey-wp-subscription-actions-label {
+				margin: 0 0 4px;
+				font-weight: 600;
+			}
+
+			.dropkey-wp-subscription-action {
+				width: 100%;
+				text-align: left;
+			}
+
+			.dropkey-wp-subscription-action-primary {
+				border-color: #2271b1;
+			}
+
+			.dropkey-wp-subscription-action-primary:hover,
+			.dropkey-wp-subscription-action-primary:focus {
+				border-color: #135e96;
+			}
+
+			.dropkey-wp-subscription-action-warning {
+				color: #8a5a00;
+				border-color: #dba617;
+			}
+
+			.dropkey-wp-subscription-action-warning:hover,
+			.dropkey-wp-subscription-action-warning:focus {
+				color: #6f4700;
+				border-color: #b88900;
+				background: #fff8e5;
+			}
+
+			.dropkey-wp-subscription-action-danger {
+				color: #b32d2e;
+				border-color: #d63638;
+			}
+
+			.dropkey-wp-subscription-action-danger:hover,
+			.dropkey-wp-subscription-action-danger:focus {
+				color: #8f2425;
+				border-color: #b32d2e;
+				background: #fff0f0;
 			}
 
 			.dropkey-wp-lifecycle-table {
