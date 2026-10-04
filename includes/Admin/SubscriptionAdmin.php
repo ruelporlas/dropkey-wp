@@ -902,16 +902,18 @@ final class SubscriptionAdmin {
 										<?php foreach ( $allowed_transitions as $new_status ) : ?>
 
 											<?php
-											$action_class = $this->get_status_action_class(
-												$new_status
-											);
+											$action_class    = $this->get_status_action_class( $new_status );
+											$confirm_message = $this->get_status_action_confirmation( $new_status );
 											?>
 
 											<button
 												type="submit"
 												name="new_status"
 												value="<?php echo esc_attr( $new_status ); ?>"
-												class="button dropkey-wp-subscription-action <?php echo esc_attr( $action_class ); ?>"
+												class="button <?php echo esc_attr( $action_class ); ?>"
+												<?php if ( '' !== $confirm_message ) : ?>
+													data-confirm="<?php echo esc_attr( $confirm_message ); ?>"
+												<?php endif; ?>
 											>
 												<?php
 												echo esc_html(
@@ -1104,6 +1106,32 @@ final class SubscriptionAdmin {
 			? sanitize_key( wp_unslash( $_POST['new_status'] ) )
 			: '';
 
+		$subscription = $this->subscriptions->find( $subscription_id );
+
+		if ( ! $subscription ) {
+			$redirect_url = add_query_arg(
+				array(
+					'page' => 'dropkey-wp-subscriptions',
+					'view' => 'detail',
+					'id'   => $subscription_id,
+				),
+				admin_url( 'admin.php' )
+			);
+
+			$redirect_url = add_query_arg(
+				'dropkey_status_error',
+				rawurlencode(
+					__( 'The requested subscription could not be found.', 'dropkey-wp' )
+				),
+				$redirect_url
+			);
+
+			wp_safe_redirect( $redirect_url );
+			exit;
+		}
+
+		$previous_status = $subscription->get_status();
+
 		$result = $this->change_status->execute(
 			$subscription_id,
 			$new_status
@@ -1130,8 +1158,11 @@ final class SubscriptionAdmin {
 		}
 
 		$redirect_url = add_query_arg(
-			'dropkey_status_updated',
-			'1',
+			array(
+				'dropkey_status_updated' => '1',
+				'dropkey_status_from'    => $previous_status,
+				'dropkey_status_to'      => $new_status,
+			),
 			$redirect_url
 		);
 
@@ -1187,13 +1218,43 @@ final class SubscriptionAdmin {
 				wp_unslash( $_GET['dropkey_status_updated'] )
 			)
 		) {
-			?>
-			<div class="notice notice-success is-dismissible">
-				<p>
-					<?php echo esc_html__( 'Subscription status updated successfully.', 'dropkey-wp' ); ?>
-				</p>
-			</div>
-			<?php
+			$from_status = isset( $_GET['dropkey_status_from'] )
+				? sanitize_key( wp_unslash( $_GET['dropkey_status_from'] ) )
+				: '';
+
+			$to_status = isset( $_GET['dropkey_status_to'] )
+				? sanitize_key( wp_unslash( $_GET['dropkey_status_to'] ) )
+				: '';
+
+			if (
+				$this->is_valid_status( $from_status )
+				&& $this->is_valid_status( $to_status )
+			) {
+				?>
+				<div class="notice notice-success is-dismissible">
+					<p>
+						<?php
+						printf(
+							esc_html__(
+								'Subscription status changed from %1$s to %2$s.',
+								'dropkey-wp'
+							),
+							esc_html( $this->get_status_label( $from_status ) ),
+							esc_html( $this->get_status_label( $to_status ) )
+						);
+						?>
+					</p>
+				</div>
+				<?php
+			} else {
+				?>
+				<div class="notice notice-success is-dismissible">
+					<p>
+						<?php echo esc_html__( 'Subscription status updated successfully.', 'dropkey-wp' ); ?>
+					</p>
+				</div>
+				<?php
+			}
 		}
 
 		if ( isset( $_GET['dropkey_status_error'] ) ) {
@@ -1300,6 +1361,33 @@ final class SubscriptionAdmin {
 			default:
 				return 'dropkey-wp-subscription-action-primary';
 		}
+	}
+
+	/**
+	 * Get confirmation message for a subscription lifecycle action.
+	 *
+	 * @param string $new_status Target subscription status.
+	 * @return string
+	 */
+	private function get_status_action_confirmation( $new_status ) {
+		$messages = array(
+			Subscription::STATUS_SUSPENDED => __(
+				'Are you sure you want to suspend this subscription?',
+				'dropkey-wp'
+			),
+			Subscription::STATUS_CANCELLED => __(
+				'Are you sure you want to cancel this subscription?',
+				'dropkey-wp'
+			),
+			Subscription::STATUS_EXPIRED => __(
+				'Are you sure you want to expire this subscription?',
+				'dropkey-wp'
+			),
+		);
+
+		return isset( $messages[ $new_status ] )
+			? $messages[ $new_status ]
+			: '';
 	}
 
 	/**
@@ -1884,6 +1972,49 @@ final class SubscriptionAdmin {
 				}
 			}
 		</style>
+
+		<script>
+			document.addEventListener(
+				'DOMContentLoaded',
+				function () {
+					var forms = document.querySelectorAll(
+						'.dropkey-wp-subscription-actions'
+					);
+
+					forms.forEach(
+						function (actions) {
+							var form = actions.closest( 'form' );
+
+							if ( ! form ) {
+								return;
+							}
+
+							form.addEventListener(
+								'submit',
+								function (event) {
+									var submitter = event.submitter;
+
+									if ( ! submitter ) {
+										return;
+									}
+
+									var message = submitter.getAttribute(
+										'data-confirm'
+									);
+
+									if (
+										message
+										&& ! window.confirm( message )
+									) {
+										event.preventDefault();
+									}
+								}
+							);
+						}
+					);
+				}
+			);
+		</script>
 		<?php
 	}
 
