@@ -11,8 +11,19 @@ defined( 'ABSPATH' ) || exit;
 
 final class Schema {
 
+	/**
+	 * Current database schema version.
+	 *
+	 * @var int
+	 */
 	public const VERSION = 3;
 
+	/**
+	 * Get all database table definitions.
+	 *
+	 * @param \wpdb $wpdb WordPress database object.
+	 * @return string[]
+	 */
 	public static function get_tables( \wpdb $wpdb ) {
 		$charset_collate = $wpdb->get_charset_collate();
 
@@ -103,7 +114,7 @@ final class Schema {
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
 				UNIQUE KEY license_key (license_key),
-				UNIQUE KEY subscription_id (subscription_id),
+				KEY subscription_id (subscription_id),
 				KEY customer_id (customer_id),
 				KEY product_id (product_id),
 				KEY status (status)
