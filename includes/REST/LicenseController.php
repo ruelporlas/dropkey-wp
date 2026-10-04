@@ -29,6 +29,12 @@ final class LicenseController {
 
 	private $authenticate;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param LicenseRepository    $licenses    License repository.
+	 * @param ActivationRepository $activations Activation repository.
+	 */
 	public function __construct(
 		LicenseRepository $licenses,
 		ActivationRepository $activations
@@ -336,45 +342,71 @@ final class LicenseController {
 	/**
 	 * Add an HTTP status to a known application error.
 	 *
+	 * Existing error data is preserved. If an application error does not
+	 * explicitly define an HTTP status, it defaults to 500 rather than
+	 * being returned as a misleading successful HTTP response.
+	 *
 	 * @param \WP_Error $error Application error.
 	 * @return void
 	 */
 	private function set_error_status( \WP_Error $error ) {
-		if ( $error->get_error_data() ) {
-			return;
-		}
-
 		$code = $error->get_error_code();
 
 		$statuses = array(
-			'dropkey_license_key_required'          => 400,
-			'dropkey_product_required'              => 400,
-			'dropkey_site_url_required'             => 400,
-			'dropkey_validation_product_required'  => 400,
-			'dropkey_api_token_required'            => 400,
+			'dropkey_license_key_required'         => 400,
+			'dropkey_product_required'             => 400,
+			'dropkey_site_url_required'            => 400,
+			'dropkey_validation_product_required' => 400,
+			'dropkey_api_token_required'           => 400,
 
-			'dropkey_license_not_found'             => 404,
-			'dropkey_product_not_found'             => 404,
-			'dropkey_activation_not_found'          => 404,
+			'dropkey_license_invalid'              => 400,
+			'dropkey_activation_invalid_site_url' => 400,
 
-			'dropkey_product_mismatch'              => 403,
-			'dropkey_license_not_active'            => 403,
-			'dropkey_license_expired'               => 403,
-			'dropkey_activation_not_active'         => 403,
+			'dropkey_license_not_found'            => 404,
+			'dropkey_product_not_found'            => 404,
+			'dropkey_activation_not_found'         => 404,
 
-			'dropkey_api_token_invalid'             => 401,
+			'dropkey_product_mismatch'             => 403,
+			'dropkey_license_not_active'           => 403,
+			'dropkey_license_expired'              => 403,
+			'dropkey_activation_not_active'        => 403,
 
-			'dropkey_activation_limit_reached'      => 409,
-			'dropkey_activation_invalid_site_url'  => 400,
+			'dropkey_api_token_invalid'            => 401,
+
+			'dropkey_activation_limit_reached'     => 409,
+
+			'dropkey_activation_locked'            => 409,
+			'dropkey_activation_lock_failed'       => 409,
 		);
 
-		if ( isset( $statuses[ $code ] ) ) {
-			$error->add_data(
-				array(
-					'status' => $statuses[ $code ],
-				)
-			);
+		$existing_data = $error->get_error_data();
+
+		/*
+		 * Preserve an explicitly supplied HTTP status. Repository errors
+		 * may also contain diagnostic data such as db_error, so the mere
+		 * presence of error data must not prevent status assignment.
+		 */
+		if (
+			is_array( $existing_data )
+			&& isset( $existing_data['status'] )
+			&& is_numeric( $existing_data['status'] )
+		) {
+			return;
 		}
+
+		$status = isset( $statuses[ $code ] )
+			? $statuses[ $code ]
+			: 500;
+
+		$data = is_array( $existing_data )
+			? $existing_data
+			: array();
+
+		$data['status'] = $status;
+
+		$error->add_data(
+			$data
+		);
 	}
 
 	/**
