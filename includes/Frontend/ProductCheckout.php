@@ -121,11 +121,6 @@ final class ProductCheckout {
 
 		$return_url = esc_url_raw( $return_url );
 
-		/*
-		 * Keep the provider cancellation destination distinct from the
-		 * normal approval return destination so the frontend can render
-		 * a meaningful cancellation state.
-		 */
 		$cancel_url = add_query_arg(
 			'cancel',
 			'1',
@@ -224,12 +219,18 @@ final class ProductCheckout {
 
 						<?php foreach ( $active_plans as $index => $plan ) : ?>
 
-							<label class="dropkey-plan-option">
+							<?php $is_free = $this->is_free_plan( $plan ); ?>
+
+							<label
+								class="dropkey-plan-option"
+								data-pricing-type="<?php echo esc_attr( $is_free ? 'free' : 'paid' ); ?>"
+							>
 
 								<input
 									type="radio"
 									name="plan_id"
 									value="<?php echo esc_attr( $plan->get_id() ); ?>"
+									data-pricing-type="<?php echo esc_attr( $is_free ? 'free' : 'paid' ); ?>"
 									<?php checked( 0 === $index ); ?>
 								>
 
@@ -253,7 +254,10 @@ final class ProductCheckout {
 
 					<?php if ( ! empty( $available_gateways ) ) : ?>
 
-						<div class="dropkey-checkout-gateways">
+						<div
+							class="dropkey-checkout-gateways"
+							data-gateway-section
+						>
 
 							<h3>
 								<?php
@@ -285,14 +289,31 @@ final class ProductCheckout {
 
 						</div>
 
+					<?php endif; ?>
+
+					<?php
+					$has_gateways = ! empty( $available_gateways );
+					$first_plan   = ! empty( $active_plans )
+						? $active_plans[0]
+						: null;
+					$first_plan_is_free = $first_plan
+						? $this->is_free_plan( $first_plan )
+						: false;
+					?>
+
+					<?php if ( $has_gateways || $first_plan_is_free ) : ?>
+
 						<button
 							type="submit"
 							class="dropkey-checkout-submit"
+							data-free-label="<?php echo esc_attr__( 'Get this plan', 'dropkey-wp' ); ?>"
+							data-paid-label="<?php echo esc_attr__( 'Continue to payment', 'dropkey-wp' ); ?>"
 						>
 							<?php
-							echo esc_html__(
-								'Continue to payment',
-								'dropkey-wp'
+							echo esc_html(
+								$first_plan_is_free
+									? __( 'Get this plan', 'dropkey-wp' )
+									: __( 'Continue to payment', 'dropkey-wp' )
 							);
 							?>
 						</button>
@@ -321,7 +342,7 @@ final class ProductCheckout {
 
 		</div>
 
-		<?php if ( is_user_logged_in() && $customer && ! empty( $available_gateways ) && ! $checkout_state ) : ?>
+		<?php if ( is_user_logged_in() && $customer && ! $checkout_state ) : ?>
 
 			<script>
 				(function () {
@@ -336,46 +357,104 @@ final class ProductCheckout {
 
 						form.dataset.dropkeyInitialized = '1';
 
+						const gatewaySection = form.querySelector(
+							'[data-gateway-section]'
+						);
+
+						const submitButton = form.querySelector(
+							'.dropkey-checkout-submit'
+						);
+
+						const message = form.querySelector(
+							'.dropkey-checkout-message'
+						);
+
+						const planInputs = form.querySelectorAll(
+							'input[name="plan_id"]'
+						);
+
+						function getSelectedPlan() {
+							return form.querySelector(
+								'input[name="plan_id"]:checked'
+							);
+						}
+
+						function isSelectedPlanFree() {
+							const plan = getSelectedPlan();
+
+							return (
+								plan &&
+								plan.dataset.pricingType === 'free'
+							);
+						}
+
+						function updateCheckoutMode() {
+							if (!submitButton) {
+								return;
+							}
+
+							const free = isSelectedPlanFree();
+
+							if (gatewaySection) {
+								gatewaySection.style.display =
+									free ? 'none' : '';
+							}
+
+							submitButton.textContent = free
+								? submitButton.dataset.freeLabel
+								: submitButton.dataset.paidLabel;
+						}
+
+						planInputs.forEach(function (input) {
+							input.addEventListener(
+								'change',
+								updateCheckoutMode
+							);
+						});
+
+						updateCheckoutMode();
+
 						form.addEventListener('submit', function (event) {
 							event.preventDefault();
 
-							const submitButton = form.querySelector(
-								'.dropkey-checkout-submit'
-							);
+							const plan = getSelectedPlan();
 
-							const message = form.querySelector(
-								'.dropkey-checkout-message'
-							);
-
-							const plan = form.querySelector(
-								'input[name="plan_id"]:checked'
+							const productId = form.querySelector(
+								'input[name="product_id"]'
 							);
 
 							const gateway = form.querySelector(
 								'input[name="gateway"]:checked'
 							);
 
-							const productId = form.querySelector(
-								'input[name="product_id"]'
-							);
-
 							if (
 								!plan ||
-								!gateway ||
 								!productId ||
 								!submitButton ||
 								!message
 							) {
 								if (message) {
 									message.textContent =
-										'Please select a plan and payment method.';
+										'Please select a plan.';
 								}
 
 								return;
 							}
 
+							const free =
+								plan.dataset.pricingType === 'free';
+
+							if (!free && !gateway) {
+								message.textContent =
+									'Please select a payment method.';
+
+								return;
+							}
+
 							submitButton.disabled = true;
-							message.textContent = 'Preparing checkout…';
+							message.textContent = free
+								? 'Activating your plan…'
+								: 'Preparing checkout…';
 
 							fetch(
 								<?php
@@ -403,7 +482,9 @@ final class ProductCheckout {
 											plan.value,
 											10
 										),
-										gateway: gateway.value,
+										gateway: free
+											? ''
+											: gateway.value,
 										return_url: <?php echo wp_json_encode( $return_url ); ?>,
 										cancel_url: <?php echo wp_json_encode( $cancel_url ); ?>
 									})
@@ -442,8 +523,22 @@ final class ProductCheckout {
 									return;
 								}
 
+								if (
+									checkoutData.free &&
+									checkoutData.subscription_id
+								) {
+									<?php if ( $account_url ) : ?>
+										window.location.href =
+											<?php echo wp_json_encode( $account_url ); ?>;
+									<?php else : ?>
+										window.location.reload();
+									<?php endif; ?>
+
+									return;
+								}
+
 								throw new Error(
-									'The payment gateway did not provide a checkout URL.'
+									'The checkout could not be completed.'
 								);
 							})
 							.catch(function (error) {
@@ -1018,12 +1113,32 @@ final class ProductCheckout {
 	}
 
 	/**
+	 * Determine whether a plan is free.
+	 *
+	 * @param object $plan Plan entity.
+	 * @return bool
+	 */
+	private function is_free_plan( $plan ) {
+		return (
+			is_object( $plan )
+			&&
+			method_exists( $plan, 'is_free' )
+			&&
+			$plan->is_free()
+		);
+	}
+
+	/**
 	 * Format plan price.
 	 *
-	 * @param \DropKeyWP\Domain\Plan $plan Plan entity.
+	 * @param object $plan Plan entity.
 	 * @return string
 	 */
 	private function format_plan_price( $plan ) {
+		if ( $this->is_free_plan( $plan ) ) {
+			return __( 'Free', 'dropkey-wp' );
+		}
+
 		$price    = $plan->get_price();
 		$currency = $plan->get_currency();
 		$interval = $plan->get_billing_interval();

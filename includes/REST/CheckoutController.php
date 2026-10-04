@@ -13,12 +13,27 @@ defined( 'ABSPATH' ) || exit;
 
 final class CheckoutController {
 
+	/**
+	 * Subscription checkout service.
+	 *
+	 * @var CreateSubscriptionCheckout
+	 */
 	private $checkout;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param CreateSubscriptionCheckout $checkout Checkout service.
+	 */
 	public function __construct( CreateSubscriptionCheckout $checkout ) {
 		$this->checkout = $checkout;
 	}
 
+	/**
+	 * Register REST routes.
+	 *
+	 * @return void
+	 */
 	public function register_routes() {
 		register_rest_route(
 			'dropkey-wp/v1',
@@ -44,9 +59,15 @@ final class CheckoutController {
 						'sanitize_callback' => 'absint',
 					),
 					'gateway' => array(
-						'required'          => true,
+						/*
+						 * Free plans do not use a payment gateway.
+						 * The application layer decides whether the
+						 * selected plan actually requires one.
+						 */
+						'required'          => false,
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_key',
+						'default'           => '',
 					),
 					'return_url' => array(
 						'required'          => false,
@@ -63,10 +84,21 @@ final class CheckoutController {
 		);
 	}
 
+	/**
+	 * Check whether the current user can use checkout.
+	 *
+	 * @return bool
+	 */
 	public function permission_callback() {
 		return is_user_logged_in();
 	}
 
+	/**
+	 * Create a subscription checkout.
+	 *
+	 * @param \WP_REST_Request $request REST request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
 	public function create_subscription_checkout( \WP_REST_Request $request ) {
 		$customer_id     = absint( $request->get_param( 'customer_id' ) );
 		$current_user_id = absint( get_current_user_id() );
@@ -85,8 +117,11 @@ final class CheckoutController {
 
 		global $wpdb;
 
-		$customers = new \DropKeyWP\Database\Repositories\CustomerRepository( $wpdb );
-		$customer  = $customers->find( $customer_id );
+		$customers = new \DropKeyWP\Database\Repositories\CustomerRepository(
+			$wpdb
+		);
+
+		$customer = $customers->find( $customer_id );
 
 		if ( ! $customer ) {
 			return new \WP_Error(
@@ -105,13 +140,15 @@ final class CheckoutController {
 		if ( $customer_user_id !== $current_user_id ) {
 			return new \WP_Error(
 				'dropkey_checkout_customer_forbidden',
-				__( 'You are not authorized to use this customer account.', 'dropkey-wp' ),
+				__(
+					'You are not authorized to use this customer account.',
+					'dropkey-wp'
+				),
 				array(
-					'status'            => 403,
-					'customer_id'       => $customer_id,
-					'customer_user_id'  => $customer_user_id,
-					'current_user_id'   => $current_user_id,
-					'customer_email'    => $customer->get_email(),
+					'status'           => 403,
+					'customer_id'      => $customer_id,
+					'customer_user_id' => $customer_user_id,
+					'current_user_id'  => $current_user_id,
 				)
 			);
 		}
@@ -119,11 +156,21 @@ final class CheckoutController {
 		$result = $this->checkout->execute(
 			array(
 				'customer_id' => $customer_id,
-				'product_id'  => absint( $request->get_param( 'product_id' ) ),
-				'plan_id'     => absint( $request->get_param( 'plan_id' ) ),
-				'gateway'     => sanitize_key( $request->get_param( 'gateway' ) ),
-				'return_url'  => esc_url_raw( $request->get_param( 'return_url' ) ),
-				'cancel_url'  => esc_url_raw( $request->get_param( 'cancel_url' ) ),
+				'product_id'  => absint(
+					$request->get_param( 'product_id' )
+				),
+				'plan_id'     => absint(
+					$request->get_param( 'plan_id' )
+				),
+				'gateway'     => sanitize_key(
+					$request->get_param( 'gateway' )
+				),
+				'return_url'  => esc_url_raw(
+					$request->get_param( 'return_url' )
+				),
+				'cancel_url'  => esc_url_raw(
+					$request->get_param( 'cancel_url' )
+				),
 			)
 		);
 
