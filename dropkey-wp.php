@@ -63,8 +63,21 @@ spl_autoload_register( 'dropkey_wp_autoload' );
 
 /*
  * Load the main plugin class explicitly.
+ *
+ * Invalidate a potentially stale OPcache entry first. This is
+ * particularly important on hosts where OPcache timestamp validation
+ * may be disabled.
  */
-require_once __DIR__ . '/includes/Plugin.php';
+$dropkey_wp_plugin_class_file = __DIR__ . '/includes/Plugin.php';
+
+if (
+	function_exists( 'opcache_invalidate' )
+	&& file_exists( $dropkey_wp_plugin_class_file )
+) {
+	opcache_invalidate( $dropkey_wp_plugin_class_file, true );
+}
+
+require_once $dropkey_wp_plugin_class_file;
 
 /**
  * Install the database when the plugin is activated.

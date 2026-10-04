@@ -1,112 +1,208 @@
 <?php
 /**
- * Subscription event repository.
+ * DropKey WP plugin bootstrap.
  *
  * @package DropKeyWP
  */
 
-namespace DropKeyWP\Database\Repositories;
+namespace DropKeyWP;
+
+use DropKeyWP\Admin\ProductAdmin;
+use DropKeyWP\Admin\SubscriptionAdmin;
+use DropKeyWP\Admin\TestConsole;
+use DropKeyWP\Application\ChangeSubscriptionStatus;
+use DropKeyWP\Application\CreateSubscriptionCheckout;
+use DropKeyWP\Application\EnforcePastDueSubscriptions;
+use DropKeyWP\Application\ProcessPaymentEvent;
+use DropKeyWP\Database\Repositories\ActivationRepository;
+use DropKeyWP\Database\Repositories\CustomerRepository;
+use DropKeyWP\Database\Repositories\GatewayEventRepository;
+use DropKeyWP\Database\Repositories\LicenseRepository;
+use DropKeyWP\Database\Repositories\PlanRepository;
+use DropKeyWP\Database\Repositories\ProductRepository;
+use DropKeyWP\Database\Repositories\SubscriptionEventRepository;
+use DropKeyWP\Database\Repositories\SubscriptionRepository;
+use DropKeyWP\Frontend\ProductCheckout;
+use DropKeyWP\Gateways\GatewayManager;
+use DropKeyWP\REST\CheckoutController;
+use DropKeyWP\REST\LicenseController;
+use DropKeyWP\REST\WebhookController;
 
 defined( 'ABSPATH' ) || exit;
 
-final class SubscriptionEventRepository {
+/**
+ * Main plugin bootstrap class.
+ */
+final class Plugin {
 
 	/**
-	 * WordPress database object.
+	 * Singleton instance.
 	 *
-	 * @var \wpdb
+	 * @var Plugin|null
 	 */
-	private $wpdb;
+	private static $instance = null;
 
 	/**
-	 * Database table name.
+	 * Whether the plugin has already booted.
 	 *
-	 * @var string
+	 * @var bool
 	 */
-	private $table;
+	private $booted = false;
 
 	/**
-	 * Constructor.
+	 * Get the plugin instance.
 	 *
-	 * @param \wpdb $wpdb WordPress database object.
+	 * @return Plugin
 	 */
-	public function __construct( \wpdb $wpdb ) {
-		$this->wpdb  = $wpdb;
-		$this->table = $wpdb->prefix . 'dropkey_subscription_events';
+	public static function instance() {
+		if ( null === self::$instance ) {
+			self::$instance = new self();
+		}
+
+		return self::$instance;
 	}
 
 	/**
-	 * Create a subscription event.
+	 * Boot the plugin.
 	 *
-	 * @param array $data Event data.
-	 * @return int|\WP_Error Event ID or error.
+	 * @return void
 	 */
-	public function create( array $data ) {
-		$inserted = $this->wpdb->insert(
-			$this->table,
-			array(
-				'subscription_id' => absint( $data['subscription_id'] ),
-				'event_type'      => sanitize_key( $data['event_type'] ),
-				'previous_status' => sanitize_key( $data['previous_status'] ),
-				'new_status'      => sanitize_key( $data['new_status'] ),
-				'actor_user_id'   => absint( $data['actor_user_id'] ),
-				'created_at'      => current_time( 'mysql', true ),
-			),
-			array(
-				'%d',
-				'%s',
-				'%s',
-				'%s',
-				'%d',
-				'%s',
-			)
+	public function boot() {
+		if ( $this->booted ) {
+			return;
+		}
+
+		$this->booted = true;
+
+		global $wpdb;
+
+		$activation_repository        = new ActivationRepository( $wpdb );
+		$customer_repository          = new CustomerRepository( $wpdb );
+		$gateway_event_repository    = new GatewayEventRepository( $wpdb );
+		$license_repository           = new LicenseRepository( $wpdb );
+		$plan_repository              = new PlanRepository( $wpdb );
+		$product_repository           = new ProductRepository( $wpdb );
+		$subscription_event_repository = new SubscriptionEventRepository( $wpdb );
+		$subscription_repository      = new SubscriptionRepository( $wpdb );
+
+		/*
+		 * Payment gateways register themselves through GatewayManager.
+		 */
+		$gateway_manager = new GatewayManager();
+
+		/*
+		 * Payment event processing.
+		 */
+		$process_payment_event = new ProcessPaymentEvent(
+			$gateway_event_repository,
+			$subscription_repository,
+			$license_repository
 		);
 
-		if ( false === $inserted ) {
-			return new \WP_Error(
-				'dropkey_subscription_event_create_failed',
-				__(
-					'The subscription event could not be recorded.',
-					'dropkey-wp'
-				),
-				array(
-					'db_error' => $this->wpdb->last_error,
-				)
+		/*
+		 * Past-due subscription enforcement.
+		 */
+		$enforce_past_due_subscriptions = new EnforcePastDueSubscriptions(
+			$subscription_repository
+		);
+
+		/*
+		 * Subscription checkout.
+		 */
+		$create_subscription_checkout = new CreateSubscriptionCheckout(
+			$gateway_manager,
+			$customer_repository,
+			$product_repository,
+			$plan_repository,
+			$subscription_repository
+		);
+
+		/*
+		 * Subscription lifecycle changes.
+		 */
+		$change_subscription_status = new ChangeSubscriptionStatus(
+			$subscription_repository,
+			$subscription_event_repository
+		);
+
+		/*
+		 * REST controllers.
+		 */
+		$checkout_controller = new CheckoutController(
+			$create_subscription_checkout
+		);
+
+		$license_controller = new LicenseController(
+			$license_repository,
+			$activation_repository
+		);
+
+		$webhook_controller = new WebhookController(
+			$gateway_manager,
+			$process_payment_event
+		);
+
+		/*
+		 * REST routes must be registered during rest_api_init.
+		 */
+		add_action(
+			'rest_api_init',
+			array( $checkout_controller, 'register_routes' )
+		);
+
+		add_action(
+			'rest_api_init',
+			array( $license_controller, 'register_routes' )
+		);
+
+		add_action(
+			'rest_api_init',
+			array( $webhook_controller, 'register_routes' )
+		);
+
+		/*
+		 * Frontend checkout shortcode.
+		 */
+		$product_checkout = new ProductCheckout(
+			$gateway_manager
+		);
+
+		$product_checkout->register();
+
+		/*
+		 * Subscription enforcement hook.
+		 */
+		add_action(
+			'dropkey_wp_enforce_past_due_subscriptions',
+			array( $enforce_past_due_subscriptions, 'execute' )
+		);
+
+		/*
+		 * WordPress admin.
+		 */
+		if ( is_admin() ) {
+
+			$product_admin = new ProductAdmin(
+				$product_repository
 			);
+
+			$product_admin->register();
+
+			$subscription_admin = new SubscriptionAdmin(
+				$subscription_repository,
+				$customer_repository,
+				$product_repository,
+				$plan_repository,
+				$change_subscription_status
+			);
+
+			$subscription_admin->register();
+
+			$test_console = new TestConsole(
+				$gateway_manager
+			);
+
+			$test_console->register();
 		}
-
-		return (int) $this->wpdb->insert_id;
-	}
-
-	/**
-	 * Get all events for a subscription.
-	 *
-	 * Events are returned newest first.
-	 *
-	 * @param int $subscription_id Subscription ID.
-	 * @return array
-	 */
-	public function all_by_subscription( $subscription_id ) {
-		$subscription_id = absint( $subscription_id );
-
-		if ( $subscription_id <= 0 ) {
-			return array();
-		}
-
-		$sql = $this->wpdb->prepare(
-			"SELECT id, subscription_id, event_type, previous_status, new_status, actor_user_id, created_at
-			FROM {$this->table}
-			WHERE subscription_id = %d
-			ORDER BY created_at DESC, id DESC",
-			$subscription_id
-		);
-
-		$events = $this->wpdb->get_results( $sql );
-
-		if ( ! is_array( $events ) ) {
-			return array();
-		}
-
-		return $events;
 	}
 }

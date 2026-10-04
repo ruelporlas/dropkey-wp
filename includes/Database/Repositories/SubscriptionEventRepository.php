@@ -77,4 +77,36 @@ final class SubscriptionEventRepository {
 
 		return (int) $this->wpdb->insert_id;
 	}
+
+	/**
+	 * Get all events for a subscription.
+	 *
+	 * Events are returned newest first.
+	 *
+	 * @param int $subscription_id Subscription ID.
+	 * @return array
+	 */
+	public function all_by_subscription( $subscription_id ) {
+		$subscription_id = absint( $subscription_id );
+
+		if ( $subscription_id <= 0 ) {
+			return array();
+		}
+
+		$sql = $this->wpdb->prepare(
+			"SELECT id, subscription_id, event_type, previous_status, new_status, actor_user_id, created_at
+			FROM {$this->table}
+			WHERE subscription_id = %d
+			ORDER BY created_at DESC, id DESC",
+			$subscription_id
+		);
+
+		$events = $this->wpdb->get_results( $sql );
+
+		if ( ! is_array( $events ) ) {
+			return array();
+		}
+
+		return $events;
+	}
 }
