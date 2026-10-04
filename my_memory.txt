@@ -4,20 +4,20 @@ Last updated: 2026-10-04
 ==================================================
 1. PURPOSE
 ==================================================
-This is the persistent recovery/checkpoint file for the DropKey WP project.
+Persistent recovery/checkpoint file for the DropKey WP project.
 
-READ THIS FILE FIRST whenever DropKey WP context is needed or after a context reset. It exists specifically to prevent lost context, accidental assumptions, and hallucinated implementation details.
+Read this file first when DropKey WP context is needed. It prevents lost context, accidental assumptions, and hallucinated implementation details.
 
 This file records:
 - hard project rules
 - confirmed decisions
 - confirmed implementation/progress
-- recent verified testing/results
-- current work in progress
+- verified testing/results
+- current work area
 - next intended work
-- things that are still unknown and must be verified from the repository
+- known unknowns
 
-This file is a recovery aid. It is NOT a substitute for inspecting actual repository code when implementation details matter.
+This file is a recovery aid, not a substitute for inspecting actual repository code when implementation details matter.
 
 ==================================================
 2. ABSOLUTE GITHUB ACCESS RULE
@@ -28,479 +28,363 @@ Primary branch: main
 WRITABLE:
 - my_memory.txt ONLY
 
-The assistant has standing permission to read and write my_memory.txt without asking for permission each time.
-
 READ-ONLY:
 - EVERY OTHER FILE in the repository.
 
-The assistant MUST NOT create, modify, overwrite, delete, commit changes to, or otherwise alter any repository file except my_memory.txt.
+The assistant may inspect/read repository files, but MUST NOT create, modify, overwrite, delete, commit, push, alter branches, or otherwise change any repository file except my_memory.txt.
 
-Other repository files may be inspected/read when necessary to understand the implementation.
-
-If the user later explicitly changes this rule, follow the newer explicit rule.
+The user manually applies code changes locally and pushes them to GitHub.
 
 ==================================================
-3. CORE ANTI-HALLUCINATION RULES
+3. CORE WORKING RULES
 ==================================================
-1. The actual GitHub repository is the implementation source of truth.
-2. Existing code beats old conversation memory unless the user explicitly overrides it.
+1. Actual GitHub repository code is the implementation source of truth.
+2. Existing code beats old conversation memory unless explicitly overridden by the user.
 3. Never invent files, classes, methods, routes, database fields, UI behavior, completed features, or test results.
-4. Inspect actual repository files before making implementation claims when the detail matters.
-5. Do not get ahead of the user's requested task or phase.
-6. If something is not confirmed, label it UNKNOWN or REVIEW TARGET instead of guessing.
-7. Preserve existing working behavior unless there is a demonstrated reason to change it.
-8. For code changes, the user's preferred deliverable is a complete replacement file with the exact project path, not a small manual patch. However, under the current GitHub permission rule, the assistant cannot directly write those code files; only my_memory.txt can be written.
+4. Inspect actual repository files before making implementation claims when details matter.
+5. Do not get ahead of the user's requested task.
+6. If something is not confirmed, label it UNKNOWN or REVIEW TARGET.
+7. Preserve working behavior unless there is a demonstrated reason to change it.
+8. User prefers complete replacement files with exact project paths for code changes, not patches/snippets.
 9. Code should remain clean, WordPress-standard, secure, maintainable, extensible, and hook-friendly.
-10. Before a significant milestone, update this file so the project can be recovered accurately.
+10. TestConsole is currently OUT OF SCOPE and must not be changed during the current UI work.
+11. User wants the assistant to keep working through the current task unless an important question/approval is required.
 
 ==================================================
-4. PRODUCT / PROJECT
+4. PROJECT
 ==================================================
 Product: DropKey WP
 
 Purpose:
 A WordPress plugin for digital product subscriptions and licensing.
 
-Original direction:
-- clean WordPress-standard coding
+Direction:
+- WordPress-standard coding
 - extensible architecture
 - action/filter hooks
-- subscription and entitlement management
-- licensing
+- products/plans
+- customers
+- subscriptions
+- licenses/activations
+- entitlements
 - payment gateway abstraction
 - PayPal integration
-- REST/API support
-- WordPress admin management
-- test/diagnostic console
+- REST/API
+- frontend customer/account UI
+- WordPress admin UI
+- diagnostics/testing later
 
 ==================================================
-5. ESTABLISHED HIGH-LEVEL ARCHITECTURE
+5. ARCHITECTURE
 ==================================================
-Known architecture:
-
-WordPress plugin bootstrap
-→ Core Plugin
-→ Application use cases
-→ Domain entities/value concepts
-→ Repositories/database persistence
-→ REST / Frontend / Admin interfaces
-→ Payment Gateway abstraction
-→ PayPal implementation
-→ Payment/webhook processing
-→ Subscription entitlement synchronization
-→ License lifecycle
-
-Known architectural layers:
-- Root/plugin bootstrap
-- Core
-- Domain
-- Application
-- Database/repositories
+Known layers:
+- plugin bootstrap/core
+- domain
+- application/use cases
+- database/repositories
 - REST
-- Frontend
-- Admin
-- Gateways
+- frontend
+- admin
+- gateways
+
+Flow:
+WordPress bootstrap
+→ application/use cases
+→ domain
+→ repositories/database
+→ REST/frontend/admin
+→ payment gateway abstraction
+→ PayPal
+→ webhook/payment processing
+→ subscription lifecycle
+→ entitlement/license lifecycle
 
 ==================================================
-6. CONFIRMED REPOSITORY STRUCTURE
+6. CONFIRMED BACKEND PROGRESS
 ==================================================
-Root:
-- .gitignore
-- New Text Document.txt
-- dropkey-audit.txt
-- dropkey-wp.php
-- my_memory.txt
+Completed/mostly completed:
+- products and plans
+- customers
+- subscriptions
+- licensing
+- entitlements
+- PayPal gateway integration
+- checkout creation
+- webhook verification/boundary
+- lifecycle status handling
+- renewal handling
+- payment failure handling
+- license creation race protection
+- gateway event concurrency protection
+- activation concurrency protection
+- deactivation concurrency protection
+- PayPal product/plan provisioning race protection
+- checkout local-persistence compensation
+- checkout application boundary hardening
+- frontend checkout
+- customer account dashboard
+- activation management
+- post-checkout UX
 
-Admin:
-- includes/Admin/PlanAdmin.php
-- includes/Admin/ProductAdmin.php
-- includes/Admin/SubscriptionAdmin.php
-- includes/Admin/TestConsole.php
+Important confirmed implementations:
+- SubscriptionRepository records lifecycle timestamps for cancellation/expiration and supports past-due handling.
+- ChangeSubscriptionStatus validates legal transitions, uses a subscription advisory lock, persists lifecycle events, and fires lifecycle hooks.
+- SynchronizeSubscriptionEntitlement does not automatically restore explicitly revoked licenses.
+- EnforcePastDueSubscriptions uses a 7-day grace period before moving past_due subscriptions to suspended.
+- CreateLicense uses a subscription-specific advisory lock and rechecks state before creating a license.
+- GatewayEventRepository now uses a 5-minute processing lease with updated_at as the ownership token; finalization is conditional on that token.
+- ProcessPaymentEvent stale-worker failure handling was fixed so a worker that loses processing ownership does not emit a false gateway-event-failed action.
+- ActivateLicense uses a license-specific advisory lock so concurrent activation requests cannot bypass the activation limit.
+- DeactivateLicense uses an activation-specific advisory lock and is idempotent.
+- PayPal product/plan provisioning uses resource-specific advisory locks and rechecks mappings before provider creation.
+- CreateSubscriptionCheckout validates product/plan status and redirect URL origin and compensates a provider subscription if local persistence fails and no local winner exists.
+- ProcessPaymentEvent constructor mismatch was fixed; current Plugin.php wiring uses four arguments and the fatal error was confirmed gone by the user.
 
-Application:
-- ActivateLicense.php
-- ActivateSubscription.php
-- AuthenticateActivation.php
-- ChangePlanStatus.php
-- ChangeProductStatus.php
-- ChangeSubscriptionStatus.php
-- CreateCustomer.php
-- CreateLicense.php
-- CreatePlan.php
-- CreateProduct.php
-- CreateSubscription.php
-- CreateSubscriptionCheckout.php
-- DeactivateLicense.php
-- EnforcePastDueSubscriptions.php
-- ProcessPaymentEvent.php
-- SynchronizeSubscriptionEntitlement.php
-- UpdatePlan.php
-- UpdateProduct.php
-- ValidateLicense.php
-
-Database:
-- Installer.php
-- Schema.php
-- repositories/ActivationRepository.php
-- repositories/CustomerRepository.php
-- repositories/GatewayEventRepository.php
-- repositories/GatewayMappingRepository.php
-- repositories/LicenseRepository.php
-- repositories/PlanRepository.php
-- repositories/ProductRepository.php
-- repositories/SubscriptionEventRepository.php
-- repositories/SubscriptionRepository.php
-
-Domain:
-- Activation.php
-- BillingInterval.php
-- Customer.php
-- GatewayEvent.php
-- GatewayMapping.php
-- License.php
-- Plan.php
-- PlanStatus.php
-- Product.php
-- ProductStatus.php
-- ProductType.php
-- Subscription.php
-
-Frontend:
-- ProductCheckout.php
-
-Gateways:
-- Contracts/PaymentGatewayInterface.php
-- GatewayManager.php
-- PayPal/PayPalGateway.php
-- PayPal/PayPalSettings.php
-
-Core:
-- Plugin.php
-
-REST:
-- CheckoutController.php
-- LicenseController.php
-- WebhookController.php
-
-IMPORTANT:
-The above is the last confirmed tree snapshot. Do not treat it as proof that no additional files now exist. Inspect the current repository when a current file list is required.
+Schema:
+- current confirmed Schema::VERSION = 3
+- gateway event uniqueness is (gateway,event_id)
+- no schema bump is currently required for the above concurrency work
 
 ==================================================
-7. CONFIRMED APPLICATION / DOMAIN CAPABILITIES
-==================================================
-Known application use cases include:
-- create/update products
-- activate/deactivate product status
-- create/update plans
-- activate/deactivate plan status
-- create customers
-- create subscriptions
-- change subscription status
-- subscription checkout
-- process payment events
-- synchronize subscription entitlement
-- enforce past-due subscriptions
-- create licenses
-- activate licenses
-- authenticate activations
-- validate licenses
-- deactivate licenses
-
-Known domain concepts include:
-- Product
-- ProductType
-- ProductStatus
-- Plan
-- PlanStatus
-- BillingInterval
-- Customer
-- Subscription
-- License
-- Activation
-- GatewayEvent
-- GatewayMapping
-
-==================================================
-8. CONFIRMED PAYMENT / PAYPAL PROGRESS
+7. PAYPAL / INTEGRATION TESTING
 ==================================================
 CONFIRMED:
 - PayPal Sandbox OAuth authentication succeeded.
-- PayPal gateway credentials/environment were working during testing.
-- PayPalGateway was implemented to create subscription checkout.
-- create_subscription_checkout() returns the PayPal subscription ID, approval URL, status, and provider response.
-- Public product/plan creation through PayPal was removed/avoided; PayPal gateway retained provider-side retrieval/cancellation/webhook parsing responsibilities.
-- Payment gateway abstraction remains through PaymentGatewayInterface and GatewayManager.
-- PayPal is the currently confirmed concrete gateway.
+- PayPal checkout flow has been exercised.
+- PayPal subscription creation returns provider subscription ID and approval URL.
+- Renewal simulation for Subscription #14 succeeded.
 
-Do NOT assume production PayPal readiness merely because sandbox authentication and tests worked.
-
-==================================================
-9. CONFIRMED REST/API PROGRESS
-==================================================
-Confirmed REST routes from prior project work:
-
-POST /wp-json/dropkey-wp/v1/checkout/subscription
-POST /wp-json/dropkey-wp/v1/webhooks/{gateway}
-
-Confirmed checkout behavior from prior testing/context:
-- checkout requires authentication
-- checkout uses Customer #1 ownership by WordPress User #2 in the tested environment
-
-These exact test-account relationships are test-environment facts, not a general product rule unless actual code confirms otherwise.
-
-==================================================
-10. CONFIRMED SUBSCRIPTION / PAYMENT TEST RESULT
-==================================================
-A renewal simulation for Subscription #14 was successfully processed.
-
-Confirmed resulting state from the test:
+Subscription #14 confirmed test result:
 - status: active
-- previous/current renewal period advanced to:
+- renewal period advanced:
   2026-11-03 10:00:00 → 2026-12-03 10:00:00
 - PayPal subscription ID:
-  I-7D03DB2WJ2J3
+  I-7D03BW2J2J3
 
-This is an important confirmed integration milestone:
-PayPal renewal simulation → payment event processing → subscription persistence/state update worked in the tested scenario.
-
-Do not generalize this one successful test into proof that every webhook/event/state edge case is correct. Those still require verification.
+This proves the tested renewal path worked. It does not prove every webhook/lifecycle edge case.
 
 ==================================================
-11. CONFIRMED ADMIN PROGRESS — SUBSCRIPTIONS
+8. CONFIRMED FRONTEND PROGRESS
 ==================================================
-SubscriptionAdmin.php is an important current admin surface.
+ProductCheckout.php:
+- shortcode [dropkey_product id="1"]
+- displays product and active plans
+- available gateway handling
+- authenticated checkout request
+- PayPal approval redirect
+- post-checkout status handling
+- detects PayPal subscription_id return
+- detects cancellation via cancel=1
+- looks up local subscription by PayPal subscription ID
+- shows subscription state/result
+- provides account/product navigation
+- cleans provider query parameters from browser history
+- latest local correction uses a distinct cancel_url with cancel=1 so the cancellation branch is reachable
 
-USER-CONFIRMED STATUS:
-- The Subscription Details page is DONE.
-- The previously discussed sidebar styling work is considered complete.
-- Do not treat the Subscription Details page as the active unfinished UI task.
-
-Previously completed styling work included:
-- subscription detail sidebar postbox headers
-- Lifecycle table
-- IDs table
-- header title spacing/padding
-- sidebar table column spacing
-
-The final styling is now considered DONE by explicit user confirmation.
-
-==================================================
-12. RECENT GITHUB HISTORY / MILESTONES
-==================================================
-Known repository history includes:
-- 63d6a5f131c3da458f245461f1b14e4adf289f52 — Initial DropKey WP project
-- followed by a series of implementation commits with generic message "updated dropkey wp"
-- PayPal and subscription implementation/testing progressed during 2026-10-03
-- 85faaa4b94ba4ca5bfce1f586c1454ff746ede65 — most recent implementation commit before creation of this memory file
-- f8f9f41fc3cce6ad80918fbf7e22fd457f98e8e3 — created my_memory.txt
-- 8eafc4a16956951646e8998b79382b910f4b38e3 — populated this recovery memory file
-- 50cd89c39f9b029267a3d6fcd3e9b467a8efb27a — expanded recovery memory with project progress and current status
-- latest memory update: records Subscription Details UI as DONE
-
-Do not infer exact changes from generic commit messages alone. Read the actual files or commit diffs when exact historical changes are needed.
+CustomerAccount.php:
+- shortcode [dropkey_account]
+- customer dashboard
+- subscription overview
+- license overview
+- activation listing
+- activation management form
+- one-time API token display after successful activation
+- copy button
+- activation count/list update
+- raw API token is not persisted or exposed later
+- current activation endpoint remains public because it accepts license key + product slug + site URL
 
 ==================================================
-13. WHAT HAS BEEN ACCOMPLISHED OVERALL
+9. ADMIN UI PROGRESS
 ==================================================
-The project has moved well beyond an initial architecture/prototype.
+SubscriptionAdmin:
+- Subscription Details page is DONE by explicit user confirmation.
+- Sidebar postbox headers DONE.
+- Lifecycle table styling DONE.
+- IDs table styling DONE.
+- Header title spacing/padding DONE.
+- Sidebar table column spacing DONE.
 
-Confirmed broad implementation areas now exist:
-- WordPress plugin bootstrap/core
-- domain model
-- application/use-case layer
-- database schema/installer
-- repositories
-- product and plan management
-- customer handling
-- subscription handling
-- licensing
-- activation lifecycle
-- REST checkout/webhook endpoints
-- frontend checkout surface
-- admin management screens
-- payment gateway abstraction
-- PayPal integration
-- entitlement synchronization
-- payment event processing
-- past-due enforcement
-- test console
+CustomerAdmin:
+- customer list/add flow exists and has been reviewed.
+- CreateCustomer wiring was checked; no constructor mismatch found.
 
-The project has also reached real integration testing:
-- PayPal sandbox authentication succeeded.
-- Subscription checkout/payment flow has been exercised.
-- A renewal simulation for Subscription #14 successfully updated persisted subscription state and billing period.
-- Subscription Details admin UI is now explicitly confirmed DONE.
+LicenseAdmin:
+- license list/context/status filters/activation usage/expiry
+- secure revoke action
+- WordPress-native admin UI
+- capability and nonce handling
+- reviewed against actual License domain/repository.
 
-Therefore, the project is currently in an IMPLEMENTATION + INTEGRATION VERIFICATION / POLISH stage, with the Subscription Details UI completed.
+ProductAdmin — CURRENT UI MILESTONE:
+The user wanted Edit Product removed from the sidebar because the Products list already has an Edit action.
+
+Problem encountered:
+1. Edit Product was registered as a normal submenu item, so it appeared in the sidebar.
+2. Registering it with a null parent caused:
+   strip_tags(): Passing null to parameter #1 ($string) is deprecated
+   in wp-admin/admin-header.php line 41.
+3. Removing the submenu after normal registration caused:
+   Sorry, you are not allowed to access this page.
+4. Registering it as a hidden top-level page and then removing the menu still caused the same admin-header strip_tags null deprecation.
+
+Root cause resolution:
+The stable solution is to keep Edit Product fully registered as a normal submenu page and hide only its sidebar link with admin CSS.
+
+Current local ProductAdmin behavior, CONFIRMED BY USER:
+- Products visible in sidebar.
+- Add Product visible in sidebar.
+- Edit Product hidden from sidebar.
+- Edit Product remains directly accessible through the row Edit link.
+- Previous deprecation is gone.
+- Previous access error is gone.
+
+Important:
+The user's successful local ProductAdmin change may not yet exist on GitHub main because GitHub code files are read-only to the assistant. Treat the user's local result as CONFIRMED USER-TESTED, but inspect GitHub main before assuming it is committed.
 
 ==================================================
-14. CURRENT STATUS RIGHT NOW
+10. CURRENT PROJECT STATUS
 ==================================================
 As of 2026-10-04:
 
-CURRENT WORK AREA:
-Webhook/payment-event reliability hardening and verification.
+PRIORITY HAS SHIFTED:
+Backend hardening is paused for now.
 
-CONFIRMED CURRENT SOURCE INSPECTION:
-- GatewayEventRepository currently has an atomic received→processing claim.
-- Current claim does not yet recover stale processing records.
-- Current ProcessPaymentEvent already performs payload-hash integrity checks and uses the stored payload for processing.
-- Current ProcessPaymentEvent returns a WP_Error for a concurrently processing event, which may cause an unnecessary provider retry depending on WebhookController behavior.
-- Current ProcessPaymentEvent does NOT yet reconcile PayPal webhook state against the current PayPal subscription resource.
-- Current Plugin.php does NOT yet pass a shared GatewayManager into ProcessPaymentEvent.
-- Current Schema.php remains VERSION 3 and has no additional webhook-ordering fields.
-- No code changes from the latest webhook-hardening proposal have been applied to repository files.
+CURRENT PRIORITY:
+UI completion and real product testing.
 
-CURRENT DESIGN DIRECTION (PROPOSED / NOT YET DEPLOYED):
-- Keep GitHub code files read-only.
-- Improve webhook reliability as a subsystem rather than only adding a processing lock.
-- Preserve payload integrity/idempotency.
-- Keep atomic event claiming.
-- Treat a concurrently processing duplicate as safely acknowledged rather than generating an unnecessary provider retry.
-- Recover stale processing events after a safety timeout.
-- For PayPal subscription events, reconcile against PayPal's current subscription resource to reduce out-of-order webhook state regressions.
-- Preserve existing lifecycle/audit architecture.
-- Preserve renewal behavior, including active subscriptions whose billing period changes without a status change.
-- Avoid unnecessary database schema changes unless later verification demonstrates they are required.
-- Avoid unnecessary PayPal API calls outside webhook reconciliation.
-- No GitHub writes except this my_memory.txt file.
+The goal is to continue the admin/frontend UI until DropKey WP behaves like an actual usable product, then perform broader end-to-end testing.
 
-IMPORTANT:
-The above design direction is NOT a confirmed deployed implementation. Do not claim these changes are active until the user applies the replacement files locally and testing confirms them.
+Do NOT resume theoretical backend hardening unless:
+- the user explicitly asks for it, or
+- actual UI/product testing exposes a concrete backend defect.
 
 ==================================================
-15. NEXT WORK — PLANNED, NOT YET COMPLETED
+11. NEXT STEP WHEN WE RESUME
 ==================================================
-Immediate planned work:
-1. Finish reviewing the actual WebhookController contract against the new ProcessPaymentEvent behavior.
-2. Validate the proposed ProcessPaymentEvent/GatewayEventRepository changes against the actual PayPalGateway get_subscription() response shape.
-3. Provide complete replacement files only; do not write repository code files.
-4. User applies the replacements locally.
-5. Test duplicate, concurrent, failed/retry, stale-processing, renewal, payment-failure, suspension, cancellation, and expiration scenarios.
-6. Only after successful testing mark the webhook-hardening implementation as CONFIRMED.
+Immediate next step:
+Continue the ADMIN UI audit/implementation after ProductAdmin.
 
-Broader verification sequence remains a future phase:
-1. Domain → Application → Repository flow.
-2. Application → REST/Admin integration.
-3. Subscription lifecycle/state transitions.
-4. Entitlement synchronization.
-5. License creation/activation/authentication/validation/deactivation.
-6. Payment/webhook processing and idempotency.
-7. Past-due subscription handling.
-8. Authorization, capabilities, nonces, and permissions.
-9. Database consistency and error handling.
-10. Input validation, sanitization, escaping, and security.
-11. WordPress coding standards.
-12. Action/filter hook quality and extensibility.
-13. Admin/application/persistence agreement.
-14. Repeated payment events and webhook idempotency.
-15. Repeated activation/deactivation and other lifecycle edge cases.
-16. Expired/voided/inactive states.
-17. Gateway mapping consistency.
+Planned sequence:
+1. ProductAdmin — now stable; preserve current working behavior.
+2. Review PlanAdmin UI and actual user flows:
+   - Products → Plans relationship
+   - list/add/edit/status actions
+   - navigation consistency
+   - notices/errors
+   - styling consistency
+   - real CRUD flow
+3. Review remaining SubscriptionAdmin UI outside the already-completed Subscription Details page.
+4. Review CustomerAdmin UI and customer workflows.
+5. Review LicenseAdmin UI and license workflows.
+6. Review frontend ProductCheckout and CustomerAccount together as one customer journey.
+7. Run actual end-to-end UI tests:
+   - create product
+   - create plan
+   - create customer
+   - checkout
+   - PayPal approval/return
+   - subscription state
+   - license creation
+   - activation
+   - account display
+   - admin visibility/status changes
+8. Fix concrete issues discovered during those tests.
+9. Only after the UI is working as a product, return to broader integration/security/hardening review.
 
-These are REVIEW TARGETS, not known bugs.
+Do not skip directly to theoretical architecture review.
 
 ==================================================
-16. CONFIRMED VS UNKNOWN
+12. TESTING STATUS / LIMITATIONS
+==================================================
+Confirmed real testing:
+- PayPal sandbox authentication
+- checkout/payment flow
+- Subscription #14 renewal simulation
+- ProductAdmin local runtime test after the latest menu fix
+
+No direct browser/WordPress runtime environment is available to the assistant through current tools.
+
+GitHub repository access is available for read-only inspection.
+
+Therefore:
+- repository inspection = source-of-truth verification
+- user runtime testing = actual WordPress/browser confirmation
+- never claim a runtime test was performed unless the user or an available runtime actually confirms it
+
+==================================================
+13. CONFIRMED VS UNKNOWN
 ==================================================
 CONFIRMED:
-- Product is named DropKey WP.
-- Repository is ruelporlas/dropkey-wp.
-- main is the working branch referenced in this project.
-- Only my_memory.txt is writable by the assistant.
-- The repository has the broad architecture listed above.
-- PayPal sandbox OAuth succeeded.
-- Subscription checkout/payment work has been exercised.
-- Subscription #14 renewal simulation succeeded with the recorded active period and PayPal ID.
-- REST checkout/webhook routes listed above were confirmed.
-- Subscription Details page is DONE by explicit user confirmation.
-- Sidebar postbox header styling is DONE.
-- Lifecycle table styling is DONE.
-- IDs table styling is DONE.
-- Header title spacing/padding is DONE.
-- Sidebar table column spacing is DONE.
-- Last-known-working SubscriptionAdmin.php remains the source of truth for preserving functional behavior during styling work.
-- Current webhook event table has a unique (gateway,event_id) constraint.
-- Current GatewayEventRepository has an atomic received→processing claim.
-- Current ProcessPaymentEvent verifies payload hashes before processing.
-- Latest webhook-hardening code proposals have NOT been deployed to repository code files.
+- DropKey WP project and repository identity.
+- GitHub permission boundary.
+- layered architecture.
+- PayPal integration exists.
+- PayPal sandbox OAuth worked.
+- Subscription #14 renewal simulation worked.
+- backend concurrency fixes listed above are implemented in the intended/current codebase unless a later GitHub inspection contradicts that.
+- ProductCheckout and CustomerAccount UI work described above exists in the current intended/local implementation.
+- Subscription Details UI is DONE.
+- ProductAdmin sidebar/Edit Product issue is RESOLVED in the user's local runtime.
+- TestConsole is out of scope during current UI work.
 
 UNKNOWN / MUST VERIFY:
-- Exact implementation details not recorded in this file.
-- Exact current WebhookController behavior/response mapping at the moment a replacement is applied.
-- Exact PayPal get_subscription() response behavior across all relevant subscription states.
-- Whether the proposed remote-state reconciliation should run for every PayPal subscription webhook or only selected event types.
-- Whether all webhook edge cases are correct after local testing.
-- Whether all security/capability/nonce concerns are fully satisfied.
+- Which local UI changes have already been pushed to GitHub main.
+- Exact current GitHub contents of any file that the user may have changed locally after the last commit.
+- Full PlanAdmin UI quality.
+- Full CustomerAdmin UI quality.
+- Full LicenseAdmin UI quality.
+- Remaining SubscriptionAdmin UI quality outside the completed Details page.
+- Full end-to-end browser/product testing.
+- Any issue not demonstrated by repository inspection or actual testing.
 - Production PayPal readiness.
-- Any feature not explicitly confirmed above.
 
 ==================================================
-17. RECOVERY PROTOCOL FOR FUTURE ASSISTANT SESSIONS
+14. RECOVERY PROTOCOL
 ==================================================
-When DropKey WP context is missing or uncertain:
+When context is missing:
 
 STEP 1
-Read my_memory.txt first.
+Read my_memory.txt.
 
 STEP 2
-Re-establish the GitHub permission boundary:
-- my_memory.txt = read/write
+Re-establish:
+- my_memory.txt = writable
 - everything else = read-only
 
 STEP 3
-Read the user's current request carefully.
-Do not continue an old task merely because it appears in this file.
+Read the user's current request. Do not blindly continue an old task.
 
 STEP 4
-Use this file to understand:
-- project direction
-- completed milestones
-- current status
-- known decisions
-- known test results
+Inspect actual repository files before making current implementation claims.
 
 STEP 5
-If an implementation claim is needed, inspect the actual repository file(s). Do not rely on memory alone.
+Classify information:
+- CONFIRMED
+- PROJECT DIRECTION
+- REVIEW TARGET
+- UNKNOWN
 
 STEP 6
-Classify information:
-- CONFIRMED = directly established by repository inspection, actual testing, or explicit user decision.
-- PROJECT DIRECTION = intended/agreed architecture.
-- REVIEW TARGET = planned verification, not a known defect.
-- UNKNOWN = do not guess.
+When a significant milestone is confirmed, update my_memory.txt.
 
 STEP 7
-If a significant milestone is completed, update my_memory.txt immediately.
-
-STEP 8
-Never modify any repository file other than my_memory.txt under the current rule.
+For code changes, provide complete replacement files with exact paths. The user applies and pushes code changes manually.
 
 ==================================================
-18. MEMORY MAINTENANCE RULE
+15. CURRENT RECOVERY SNAPSHOT
 ==================================================
-Update this file when:
-- the user explicitly asks to record progress
-- a significant implementation milestone is confirmed
-- a significant test succeeds/fails
-- an important architecture decision is made
-- the current task/status changes materially
-- a known issue is resolved
-- a new constraint is established
+DropKey WP is now in the UI completion + product testing stage.
 
-Keep entries factual and concise enough to scan.
+The backend/payment foundation is substantially implemented and has passed meaningful PayPal sandbox/renewal testing. The customer-facing checkout/account/activation journey has been built.
 
-Never turn assumptions, proposed work, or review targets into confirmed facts.
+The latest UI issue was ProductAdmin's Edit Product sidebar entry. The final fix keeps Edit Product registered normally but hides only its submenu link with admin CSS. The user confirmed the deprecation and access error are now gone.
 
-==================================================
-19. CURRENT RECOVERY SNAPSHOT
-==================================================
-If everything else is forgotten, remember this:
-
-DropKey WP is an existing WordPress subscription/licensing plugin with a layered architecture and PayPal integration. PayPal sandbox authentication succeeded, and a Subscription #14 renewal simulation successfully persisted an active renewal period of 2026-11-03 10:00:00 through 2026-12-03 10:00:00 for PayPal subscription I-7D03DB2WJ2J3.
-
-The Subscription Details admin page is DONE. Its sidebar postbox headers, Lifecycle table, IDs table, header spacing, and sidebar table column spacing were all explicitly confirmed complete by the user.
-
-The current engineering focus is webhook/payment-event reliability hardening. The proposed changes are NOT yet deployed. GitHub code files must remain read-only; only my_memory.txt may be updated by the assistant.
+When we pick this up tomorrow:
+→ continue with the next admin UI surface, starting with PlanAdmin.
+→ inspect the actual GitHub main file before making claims.
+→ keep TestConsole untouched.
+→ keep GitHub code files read-only.
+→ work toward a complete usable product and actual end-to-end testing.
 
 END OF RECOVERY FILE
