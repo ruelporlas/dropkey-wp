@@ -604,6 +604,70 @@ final class PlanAdmin {
 				?>
 			</form>
 		</div>
+
+		<?php $this->render_plan_slug_script(); ?>
+		<?php
+	}
+
+	/**
+	 * Render the plan-name to slug helper for the add-plan form.
+	 *
+	 * The slug is automatically generated from the plan name until the
+	 * administrator manually changes the slug. Once manually changed,
+	 * the administrator retains full control over the value.
+	 *
+	 * @return void
+	 */
+	private function render_plan_slug_script() {
+		?>
+		<script>
+			(function () {
+				const nameField = document.getElementById('dropkey_wp_plan_name');
+				const slugField = document.getElementById('dropkey_wp_plan_slug');
+
+				if (!nameField || !slugField) {
+					return;
+				}
+
+				let slugManuallyEdited = slugField.value.trim() !== '';
+
+				const createSlug = function (value) {
+					return value
+						.toString()
+						.normalize('NFKD')
+						.replace(/[\u0300-\u036f]/g, '')
+						.toLowerCase()
+						.trim()
+						.replace(/[^a-z0-9\s-]/g, '')
+						.replace(/[\s_-]+/g, '-')
+						.replace(/^-+|-+$/g, '');
+				};
+
+				nameField.addEventListener('input', function () {
+					if (slugManuallyEdited) {
+						return;
+					}
+
+					slugField.value = createSlug(nameField.value);
+				});
+
+				slugField.addEventListener('input', function () {
+					const slug = slugField.value.trim();
+
+					if ('' === slug) {
+						slugManuallyEdited = false;
+						slugField.value = createSlug(nameField.value);
+						return;
+					}
+
+					slugManuallyEdited = true;
+				});
+
+				if ('' === slugField.value.trim()) {
+					slugField.value = createSlug(nameField.value);
+				}
+			}());
+		</script>
 		<?php
 	}
 
