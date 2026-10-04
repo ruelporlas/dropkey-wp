@@ -115,7 +115,10 @@ final class SubscriptionAdmin {
 
 		$gateways = $this->subscriptions->all_gateways();
 
-		if ( '' !== $gateway && ! in_array( $gateway, $gateways, true ) ) {
+		if (
+			'' !== $gateway
+			&& ! in_array( $gateway, $gateways, true )
+		) {
 			$gateway = '';
 		}
 
@@ -134,15 +137,21 @@ final class SubscriptionAdmin {
 			$plan_id     = $subscription->get_plan_id();
 
 			if ( ! isset( $customers[ $customer_id ] ) ) {
-				$customers[ $customer_id ] = $this->customers->find( $customer_id );
+				$customers[ $customer_id ] = $this->customers->find(
+					$customer_id
+				);
 			}
 
 			if ( ! isset( $products[ $product_id ] ) ) {
-				$products[ $product_id ] = $this->products->find( $product_id );
+				$products[ $product_id ] = $this->products->find(
+					$product_id
+				);
 			}
 
 			if ( ! isset( $plans[ $plan_id ] ) ) {
-				$plans[ $plan_id ] = $this->plans->find( $plan_id );
+				$plans[ $plan_id ] = $this->plans->find(
+					$plan_id
+				);
 			}
 		}
 
@@ -153,302 +162,544 @@ final class SubscriptionAdmin {
 				<?php echo esc_html__( 'Subscriptions', 'dropkey-wp' ); ?>
 			</h1>
 
+			<span class="title-count">
+				<?php echo esc_html( number_format_i18n( count( $subscriptions ) ) ); ?>
+			</span>
+
 			<hr class="wp-header-end" />
 
-			<?php $this->render_filters( $status, $gateway, $gateways ); ?>
+			<?php $this->render_status_filters( $status, $gateway ); ?>
+
+			<?php $this->render_gateway_filter( $status, $gateway, $gateways ); ?>
 
 			<?php if ( empty( $subscriptions ) ) : ?>
 
-				<p>
-					<?php
-					echo esc_html__(
-						'No subscriptions found.',
-						'dropkey-wp'
-					);
-					?>
-				</p>
+				<div class="notice notice-info inline">
+					<p>
+						<?php
+						echo esc_html__(
+							'No subscriptions found.',
+							'dropkey-wp'
+						);
+						?>
+					</p>
+				</div>
 
 			<?php else : ?>
 
-				<table class="widefat fixed striped">
+				<div class="dropkey-wp-subscriptions-table">
 
-					<thead>
-						<tr>
+					<table class="widefat striped">
 
-							<th scope="col">
-								<?php echo esc_html__( 'ID', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Customer', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Product', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Plan', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Gateway', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Gateway Subscription ID', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Status', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Current Period', 'dropkey-wp' ); ?>
-							</th>
-
-							<th scope="col">
-								<?php echo esc_html__( 'Created', 'dropkey-wp' ); ?>
-							</th>
-
-						</tr>
-					</thead>
-
-					<tbody>
-
-						<?php foreach ( $subscriptions as $subscription ) : ?>
-
-							<?php
-							$customer = isset(
-								$customers[ $subscription->get_customer_id() ]
-							)
-								? $customers[ $subscription->get_customer_id() ]
-								: null;
-
-							$product = isset(
-								$products[ $subscription->get_product_id() ]
-							)
-								? $products[ $subscription->get_product_id() ]
-								: null;
-
-							$plan = isset(
-								$plans[ $subscription->get_plan_id() ]
-							)
-								? $plans[ $subscription->get_plan_id() ]
-								: null;
-							?>
-
+						<thead>
 							<tr>
 
-								<td>
-									<strong>
-										<?php echo esc_html( $subscription->get_id() ); ?>
-									</strong>
-								</td>
+								<th scope="col" class="column-id">
+									<?php echo esc_html__( 'ID', 'dropkey-wp' ); ?>
+								</th>
 
-								<td>
-									<?php if ( $customer ) : ?>
+								<th scope="col">
+									<?php echo esc_html__( 'Customer', 'dropkey-wp' ); ?>
+								</th>
 
-										<strong>
-											<?php
-											echo esc_html(
-												trim(
-													$customer->get_first_name() . ' ' .
-													$customer->get_last_name()
-												)
-											);
-											?>
-										</strong>
+								<th scope="col">
+									<?php echo esc_html__( 'Product', 'dropkey-wp' ); ?>
+								</th>
 
-										<br />
+								<th scope="col">
+									<?php echo esc_html__( 'Plan', 'dropkey-wp' ); ?>
+								</th>
 
-										<small>
-											<?php echo esc_html( $customer->get_email() ); ?>
-										</small>
+								<th scope="col">
+									<?php echo esc_html__( 'Gateway', 'dropkey-wp' ); ?>
+								</th>
 
-									<?php else : ?>
+								<th scope="col">
+									<?php echo esc_html__( 'Gateway Subscription ID', 'dropkey-wp' ); ?>
+								</th>
 
-										<em>
-											<?php echo esc_html__( 'Customer not found', 'dropkey-wp' ); ?>
-										</em>
+								<th scope="col">
+									<?php echo esc_html__( 'Status', 'dropkey-wp' ); ?>
+								</th>
 
-									<?php endif; ?>
-								</td>
+								<th scope="col">
+									<?php echo esc_html__( 'Current Period', 'dropkey-wp' ); ?>
+								</th>
 
-								<td>
-									<?php if ( $product ) : ?>
-
-										<strong>
-											<?php echo esc_html( $product->get_name() ); ?>
-										</strong>
-
-										<br />
-
-										<code>
-											<?php echo esc_html( $product->get_slug() ); ?>
-										</code>
-
-									<?php else : ?>
-
-										<em>
-											<?php echo esc_html__( 'Product not found', 'dropkey-wp' ); ?>
-										</em>
-
-									<?php endif; ?>
-								</td>
-
-								<td>
-									<?php if ( $plan ) : ?>
-
-										<strong>
-											<?php echo esc_html( $plan->get_name() ); ?>
-										</strong>
-
-										<br />
-
-										<small>
-											<?php
-											echo esc_html(
-												$this->format_plan_price(
-													$plan->get_price(),
-													$plan->get_currency()
-												)
-											);
-											?>
-											/
-											<?php
-											echo esc_html(
-												$this->format_billing(
-													$plan->get_billing_interval(),
-													$plan->get_billing_interval_count()
-												)
-											);
-											?>
-										</small>
-
-									<?php else : ?>
-
-										<em>
-											<?php echo esc_html__( 'Plan not found', 'dropkey-wp' ); ?>
-										</em>
-
-									<?php endif; ?>
-								</td>
-
-								<td>
-									<?php
-									echo esc_html(
-										$this->get_gateway_label(
-											$subscription->get_gateway()
-										)
-									);
-									?>
-								</td>
-
-								<td>
-									<code>
-										<?php
-										echo esc_html(
-											$subscription->get_gateway_subscription_id()
-										);
-										?>
-									</code>
-								</td>
-
-								<td>
-									<?php
-									echo esc_html(
-										$this->get_status_label(
-											$subscription->get_status()
-										)
-									);
-									?>
-
-									<?php if ( $subscription->get_cancel_at_period_end() ) : ?>
-
-										<br />
-
-										<small>
-											<?php
-											echo esc_html__(
-												'Cancels at period end',
-												'dropkey-wp'
-											);
-											?>
-										</small>
-
-									<?php endif; ?>
-								</td>
-
-								<td>
-									<?php if ( $subscription->get_current_period_start() ) : ?>
-
-										<?php
-										echo esc_html(
-											$this->format_datetime(
-												$subscription->get_current_period_start()
-											)
-										);
-										?>
-
-										<br />
-
-										<span aria-hidden="true">→</span>
-
-										<br />
-
-										<?php
-										echo esc_html(
-											$this->format_datetime(
-												$subscription->get_current_period_end()
-											)
-										);
-										?>
-
-									<?php else : ?>
-
-										<em>
-											<?php echo esc_html__( 'Not set', 'dropkey-wp' ); ?>
-										</em>
-
-									<?php endif; ?>
-								</td>
-
-								<td>
-									<?php
-									echo esc_html(
-										$this->format_datetime(
-											$subscription->get_created_at()
-										)
-									);
-									?>
-								</td>
+								<th scope="col">
+									<?php echo esc_html__( 'Created', 'dropkey-wp' ); ?>
+								</th>
 
 							</tr>
+						</thead>
 
-						<?php endforeach; ?>
+						<tbody>
 
-					</tbody>
+							<?php foreach ( $subscriptions as $subscription ) : ?>
 
-				</table>
+								<?php
+								$customer = isset(
+									$customers[ $subscription->get_customer_id() ]
+								)
+									? $customers[ $subscription->get_customer_id() ]
+									: null;
+
+								$product = isset(
+									$products[ $subscription->get_product_id() ]
+								)
+									? $products[ $subscription->get_product_id() ]
+									: null;
+
+								$plan = isset(
+									$plans[ $subscription->get_plan_id() ]
+								)
+									? $plans[ $subscription->get_plan_id() ]
+									: null;
+								?>
+
+								<tr>
+
+									<td>
+										<strong>
+											#<?php echo esc_html( $subscription->get_id() ); ?>
+										</strong>
+									</td>
+
+									<td>
+
+										<?php if ( $customer ) : ?>
+
+											<strong class="row-title">
+												<?php
+												echo esc_html(
+													$this->get_customer_name(
+														$customer
+													)
+												);
+												?>
+											</strong>
+
+											<br />
+
+											<span class="description">
+												<?php echo esc_html( $customer->get_email() ); ?>
+											</span>
+
+										<?php else : ?>
+
+											<strong>
+												<?php
+												echo esc_html__(
+													'Customer not found',
+													'dropkey-wp'
+												);
+												?>
+											</strong>
+
+											<br />
+
+											<span class="description">
+												<?php
+												printf(
+													/* translators: %d: customer ID. */
+													esc_html__(
+														'Customer #%d',
+														'dropkey-wp'
+													),
+													(int) $subscription->get_customer_id()
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+
+										<?php if ( $product ) : ?>
+
+											<strong>
+												<?php echo esc_html( $product->get_name() ); ?>
+											</strong>
+
+											<br />
+
+											<code>
+												<?php echo esc_html( $product->get_slug() ); ?>
+											</code>
+
+										<?php else : ?>
+
+											<strong>
+												<?php
+												echo esc_html__(
+													'Product not found',
+													'dropkey-wp'
+												);
+												?>
+											</strong>
+
+											<br />
+
+											<span class="description">
+												<?php
+												printf(
+													/* translators: %d: product ID. */
+													esc_html__(
+														'Product #%d',
+														'dropkey-wp'
+													),
+													(int) $subscription->get_product_id()
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+
+										<?php if ( $plan ) : ?>
+
+											<strong>
+												<?php echo esc_html( $plan->get_name() ); ?>
+											</strong>
+
+											<br />
+
+											<span class="description">
+												<?php
+												echo esc_html(
+													$this->format_plan_price(
+														$plan->get_price(),
+														$plan->get_currency()
+													)
+												);
+												?>
+
+												&nbsp;·&nbsp;
+
+												<?php
+												echo esc_html(
+													$this->format_billing(
+														$plan->get_billing_interval(),
+														$plan->get_billing_interval_count()
+													)
+												);
+												?>
+											</span>
+
+										<?php else : ?>
+
+											<strong>
+												<?php
+												echo esc_html__(
+													'Plan not found',
+													'dropkey-wp'
+												);
+												?>
+											</strong>
+
+											<br />
+
+											<span class="description">
+												<?php
+												printf(
+													/* translators: %d: plan ID. */
+													esc_html__(
+														'Plan #%d',
+														'dropkey-wp'
+													),
+													(int) $subscription->get_plan_id()
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+										<span class="dropkey-wp-gateway">
+											<?php
+											echo esc_html(
+												$this->get_gateway_label(
+													$subscription->get_gateway()
+												)
+											);
+											?>
+										</span>
+									</td>
+
+									<td>
+
+										<?php
+										$gateway_subscription_id =
+											$subscription->get_gateway_subscription_id();
+										?>
+
+										<?php if ( $gateway_subscription_id ) : ?>
+
+											<code class="dropkey-wp-gateway-id">
+												<?php
+												echo esc_html(
+													$gateway_subscription_id
+												);
+												?>
+											</code>
+
+										<?php else : ?>
+
+											<span class="description">
+												<?php
+												echo esc_html__(
+													'Not set',
+													'dropkey-wp'
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+
+										<span
+											class="dropkey-wp-status dropkey-wp-status-<?php echo esc_attr( $subscription->get_status() ); ?>"
+										>
+											<?php
+											echo esc_html(
+												$this->get_status_label(
+													$subscription->get_status()
+												)
+											);
+											?>
+										</span>
+
+										<?php if ( $subscription->get_cancel_at_period_end() ) : ?>
+
+											<br />
+
+											<span class="description">
+												<?php
+												echo esc_html__(
+													'Cancels at period end',
+													'dropkey-wp'
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+
+										<?php
+										$period_start =
+											$subscription->get_current_period_start();
+
+										$period_end =
+											$subscription->get_current_period_end();
+										?>
+
+										<?php if ( $period_start || $period_end ) : ?>
+
+											<div class="dropkey-wp-period">
+
+												<?php if ( $period_start ) : ?>
+
+													<div>
+														<span class="description">
+															<?php
+															echo esc_html__(
+																'Starts',
+																'dropkey-wp'
+															);
+															?>
+														</span>
+
+														<strong>
+															<?php
+															echo esc_html(
+																$this->format_datetime(
+																	$period_start
+																)
+															);
+															?>
+														</strong>
+													</div>
+
+												<?php endif; ?>
+
+												<?php if ( $period_end ) : ?>
+
+													<div>
+														<span class="description">
+															<?php
+															echo esc_html__(
+																'Ends',
+																'dropkey-wp'
+															);
+															?>
+														</span>
+
+														<strong>
+															<?php
+															echo esc_html(
+																$this->format_datetime(
+																	$period_end
+																)
+															);
+															?>
+														</strong>
+													</div>
+
+												<?php endif; ?>
+
+											</div>
+
+										<?php else : ?>
+
+											<span class="description">
+												<?php
+												echo esc_html__(
+													'Not set',
+													'dropkey-wp'
+												);
+												?>
+											</span>
+
+										<?php endif; ?>
+
+									</td>
+
+									<td>
+										<?php
+										echo esc_html(
+											$this->format_datetime(
+												$subscription->get_created_at()
+											)
+										);
+										?>
+									</td>
+
+								</tr>
+
+							<?php endforeach; ?>
+
+						</tbody>
+
+					</table>
+
+				</div>
 
 			<?php endif; ?>
+
+			<?php $this->render_admin_styles(); ?>
 
 		</div>
 		<?php
 	}
 
 	/**
-	 * Render subscription filters.
+	 * Render subscription status filters.
+	 *
+	 * @param string $current_status Current status filter.
+	 * @param string $current_gateway Current gateway filter.
+	 * @return void
+	 */
+	private function render_status_filters(
+		$current_status,
+		$current_gateway
+	) {
+		$filters = array(
+			''                         => __( 'All', 'dropkey-wp' ),
+			Subscription::STATUS_ACTIVE    => __( 'Active', 'dropkey-wp' ),
+			Subscription::STATUS_PENDING   => __( 'Pending', 'dropkey-wp' ),
+			Subscription::STATUS_PAST_DUE  => __( 'Past Due', 'dropkey-wp' ),
+			Subscription::STATUS_SUSPENDED => __( 'Suspended', 'dropkey-wp' ),
+			Subscription::STATUS_CANCELLED => __( 'Cancelled', 'dropkey-wp' ),
+			Subscription::STATUS_EXPIRED   => __( 'Expired', 'dropkey-wp' ),
+		);
+
+		?>
+		<ul class="subsubsub">
+
+			<?php
+			$filter_links = array();
+			$index        = 0;
+			$total        = count( $filters );
+
+			foreach ( $filters as $status => $label ) {
+				$url = admin_url(
+					'admin.php?page=dropkey-wp-subscriptions'
+				);
+
+				if ( '' !== $status ) {
+					$url = add_query_arg(
+						'status',
+						$status,
+						$url
+					);
+				}
+
+				if ( '' !== $current_gateway ) {
+					$url = add_query_arg(
+						'gateway',
+						$current_gateway,
+						$url
+					);
+				}
+
+				$is_current = $current_status === $status;
+
+				$filter_links[] =
+					'<li>' .
+					'<a href="' . esc_url( $url ) . '"' .
+					( $is_current ? ' class="current"' : '' ) .
+					'>' .
+					esc_html( $label ) .
+					'</a>' .
+					'</li>';
+
+				++$index;
+
+				if ( $index < $total ) {
+					$filter_links[ count( $filter_links ) - 1 ] .= ' |';
+				}
+			}
+
+			echo implode( ' ', $filter_links );
+			?>
+
+		</ul>
+
+		<div class="clear"></div>
+		<?php
+	}
+
+	/**
+	 * Render gateway filter.
 	 *
 	 * @param string   $status   Current status.
 	 * @param string   $gateway  Current gateway.
 	 * @param string[] $gateways Available gateways.
 	 * @return void
 	 */
-	private function render_filters( $status, $gateway, array $gateways ) {
+	private function render_gateway_filter(
+		$status,
+		$gateway,
+		array $gateways
+	) {
 		?>
-		<form method="get">
+		<form
+			method="get"
+			class="dropkey-wp-subscription-filter"
+		>
 
 			<input
 				type="hidden"
@@ -456,105 +707,209 @@ final class SubscriptionAdmin {
 				value="dropkey-wp-subscriptions"
 			/>
 
-			<div
-				style="
-					display:flex;
-					gap:8px;
-					align-items:center;
-					margin:12px 0;
-				"
+			<label
+				for="dropkey_wp_subscription_gateway"
+				class="screen-reader-text"
 			>
+				<?php echo esc_html__( 'Filter by gateway', 'dropkey-wp' ); ?>
+			</label>
 
-				<label
-					for="dropkey_wp_subscription_status"
-					class="screen-reader-text"
-				>
-					<?php echo esc_html__( 'Filter by status', 'dropkey-wp' ); ?>
-				</label>
+			<select
+				name="gateway"
+				id="dropkey_wp_subscription_gateway"
+			>
+				<option value="">
+					<?php echo esc_html__( 'All gateways', 'dropkey-wp' ); ?>
+				</option>
 
-				<select
+				<?php foreach ( $gateways as $available_gateway ) : ?>
+
+					<option
+						value="<?php echo esc_attr( $available_gateway ); ?>"
+						<?php selected( $gateway, $available_gateway ); ?>
+					>
+						<?php
+						echo esc_html(
+							$this->get_gateway_label(
+								$available_gateway
+							)
+						);
+						?>
+					</option>
+
+				<?php endforeach; ?>
+
+			</select>
+
+			<?php if ( '' !== $status ) : ?>
+
+				<input
+					type="hidden"
 					name="status"
-					id="dropkey_wp_subscription_status"
-				>
-					<option value="">
-						<?php echo esc_html__( 'All statuses', 'dropkey-wp' ); ?>
-					</option>
+					value="<?php echo esc_attr( $status ); ?>"
+				/>
 
-					<?php foreach ( $this->get_statuses() as $subscription_status ) : ?>
+			<?php endif; ?>
 
-						<option
-							value="<?php echo esc_attr( $subscription_status ); ?>"
-							<?php selected( $status, $subscription_status ); ?>
-						>
-							<?php
-							echo esc_html(
-								$this->get_status_label(
-									$subscription_status
-								)
-							);
-							?>
-						</option>
+			<button
+				type="submit"
+				class="button"
+			>
+				<?php echo esc_html__( 'Filter', 'dropkey-wp' ); ?>
+			</button>
 
-					<?php endforeach; ?>
+			<?php if ( '' !== $status || '' !== $gateway ) : ?>
 
-				</select>
-
-				<label
-					for="dropkey_wp_subscription_gateway"
-					class="screen-reader-text"
-				>
-					<?php echo esc_html__( 'Filter by gateway', 'dropkey-wp' ); ?>
-				</label>
-
-				<select
-					name="gateway"
-					id="dropkey_wp_subscription_gateway"
-				>
-					<option value="">
-						<?php echo esc_html__( 'All gateways', 'dropkey-wp' ); ?>
-					</option>
-
-					<?php foreach ( $gateways as $available_gateway ) : ?>
-
-						<option
-							value="<?php echo esc_attr( $available_gateway ); ?>"
-							<?php selected( $gateway, $available_gateway ); ?>
-						>
-							<?php
-							echo esc_html(
-								$this->get_gateway_label(
-									$available_gateway
-								)
-							);
-							?>
-						</option>
-
-					<?php endforeach; ?>
-
-				</select>
-
-				<button
-					type="submit"
+				<a
+					href="<?php echo esc_url( admin_url( 'admin.php?page=dropkey-wp-subscriptions' ) ); ?>"
 					class="button"
 				>
-					<?php echo esc_html__( 'Filter', 'dropkey-wp' ); ?>
-				</button>
+					<?php echo esc_html__( 'Clear', 'dropkey-wp' ); ?>
+				</a>
 
-				<?php if ( '' !== $status || '' !== $gateway ) : ?>
-
-					<a
-						href="<?php echo esc_url( admin_url( 'admin.php?page=dropkey-wp-subscriptions' ) ); ?>"
-						class="button"
-					>
-						<?php echo esc_html__( 'Clear', 'dropkey-wp' ); ?>
-					</a>
-
-				<?php endif; ?>
-
-			</div>
+			<?php endif; ?>
 
 		</form>
 		<?php
+	}
+
+	/**
+	 * Render small amount of page-specific admin styles.
+	 *
+	 * @return void
+	 */
+	private function render_admin_styles() {
+		?>
+		<style>
+			.dropkey-wp-subscriptions-table {
+				overflow-x: auto;
+				margin-top: 12px;
+			}
+
+			.dropkey-wp-subscriptions-table table {
+				min-width: 1280px;
+			}
+
+			.dropkey-wp-subscriptions-table th,
+			.dropkey-wp-subscriptions-table td {
+				vertical-align: top;
+			}
+
+			.dropkey-wp-subscriptions-table .column-id {
+				width: 60px;
+			}
+
+			.dropkey-wp-subscriptions-table .row-title {
+				display: inline-block;
+				margin-bottom: 2px;
+			}
+
+			.dropkey-wp-subscriptions-table .description {
+				color: #646970;
+			}
+
+			.dropkey-wp-subscriptions-table code {
+				word-break: break-word;
+			}
+
+			.dropkey-wp-gateway {
+				font-weight: 600;
+			}
+
+			.dropkey-wp-gateway-id {
+				display: inline-block;
+				max-width: 220px;
+			}
+
+			.dropkey-wp-status {
+				display: inline-block;
+				padding: 3px 8px;
+				border-radius: 3px;
+				background: #f0f0f1;
+				color: #1d2327;
+				font-size: 12px;
+				font-weight: 600;
+				line-height: 1.4;
+				white-space: nowrap;
+			}
+
+			.dropkey-wp-status-active {
+				background: #edfaef;
+				color: #18752a;
+			}
+
+			.dropkey-wp-status-pending {
+				background: #f0f0f1;
+				color: #50575e;
+			}
+
+			.dropkey-wp-status-past_due {
+				background: #fff8e5;
+				color: #8a5a00;
+			}
+
+			.dropkey-wp-status-suspended {
+				background: #fff0f0;
+				color: #b32d2e;
+			}
+
+			.dropkey-wp-status-cancelled {
+				background: #f0f0f1;
+				color: #50575e;
+			}
+
+			.dropkey-wp-status-expired {
+				background: #f6eeee;
+				color: #8a2424;
+			}
+
+			.dropkey-wp-period {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			.dropkey-wp-period div {
+				display: flex;
+				flex-direction: column;
+				gap: 1px;
+			}
+
+			.dropkey-wp-subscription-filter {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				margin: 4px 0 12px;
+			}
+
+			.title-count {
+				display: inline-block;
+				margin-left: 4px;
+				color: #646970;
+				font-size: 13px;
+				font-weight: 400;
+			}
+		</style>
+		<?php
+	}
+
+	/**
+	 * Get customer display name.
+	 *
+	 * @param object $customer Customer object.
+	 * @return string
+	 */
+	private function get_customer_name( $customer ) {
+		$name = trim(
+			$customer->get_first_name() . ' ' .
+			$customer->get_last_name()
+		);
+
+		if ( '' !== $name ) {
+			return $name;
+		}
+
+		return $customer->get_email();
 	}
 
 	/**
@@ -716,3 +1071,4 @@ final class SubscriptionAdmin {
 		}
 	}
 }
+
