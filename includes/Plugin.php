@@ -8,10 +8,10 @@
 namespace DropKeyWP;
 
 use DropKeyWP\Admin\CustomerAdmin;
+use DropKeyWP\Admin\LicenseAdmin;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
-use DropKeyWP\Admin\LicenseAdmin;
 use DropKeyWP\Application\ChangeSubscriptionStatus;
 use DropKeyWP\Application\CreateLicense;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
@@ -26,6 +26,7 @@ use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Database\Repositories\SubscriptionEventRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
+use DropKeyWP\Frontend\CustomerAccount;
 use DropKeyWP\Frontend\ProductCheckout;
 use DropKeyWP\Gateways\GatewayManager;
 use DropKeyWP\REST\CheckoutController;
@@ -39,10 +40,25 @@ defined( 'ABSPATH' ) || exit;
  */
 final class Plugin {
 
+	/**
+	 * Singleton instance.
+	 *
+	 * @var Plugin|null
+	 */
 	private static $instance = null;
 
+	/**
+	 * Whether the plugin has booted.
+	 *
+	 * @var bool
+	 */
 	private $booted = false;
 
+	/**
+	 * Get plugin instance.
+	 *
+	 * @return Plugin
+	 */
 	public static function instance() {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -51,6 +67,11 @@ final class Plugin {
 		return self::$instance;
 	}
 
+	/**
+	 * Boot the plugin.
+	 *
+	 * @return void
+	 */
 	public function boot() {
 		if ( $this->booted ) {
 			return;
@@ -192,6 +213,10 @@ final class Plugin {
 
 		$product_checkout->register();
 
+		$customer_account = new CustomerAccount();
+
+		$customer_account->register();
+
 		add_action(
 			'dropkey_wp_enforce_past_due_subscriptions',
 			array( $enforce_past_due_subscriptions, 'execute' )
@@ -212,13 +237,13 @@ final class Plugin {
 			$customer_admin->register();
 
 			$license_admin = new LicenseAdmin(
-	$license_repository,
-	$activation_repository,
-	$customer_repository,
-	$product_repository
-);
+				$license_repository,
+				$activation_repository,
+				$customer_repository,
+				$product_repository
+			);
 
-$license_admin->register();
+			$license_admin->register();
 
 			$subscription_admin = new SubscriptionAdmin(
 				$subscription_repository,
@@ -237,4 +262,4 @@ $license_admin->register();
 			$test_console->register();
 		}
 	}
-}  
+}
