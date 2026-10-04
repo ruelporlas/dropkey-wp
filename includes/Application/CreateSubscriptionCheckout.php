@@ -11,6 +11,8 @@ use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
+use DropKeyWP\Domain\PlanStatus;
+use DropKeyWP\Domain\ProductStatus;
 use DropKeyWP\Domain\Subscription;
 use DropKeyWP\Gateways\GatewayManager;
 
@@ -18,14 +20,39 @@ defined( 'ABSPATH' ) || exit;
 
 final class CreateSubscriptionCheckout {
 
+	/**
+	 * Gateway manager.
+	 *
+	 * @var GatewayManager
+	 */
 	private $gateways;
 
+	/**
+	 * Customer repository.
+	 *
+	 * @var CustomerRepository
+	 */
 	private $customers;
 
+	/**
+	 * Product repository.
+	 *
+	 * @var ProductRepository
+	 */
 	private $products;
 
+	/**
+	 * Plan repository.
+	 *
+	 * @var PlanRepository
+	 */
 	private $plans;
 
+	/**
+	 * Subscription repository.
+	 *
+	 * @var SubscriptionRepository
+	 */
 	private $subscriptions;
 
 	/**
@@ -53,6 +80,9 @@ final class CreateSubscriptionCheckout {
 
 	/**
 	 * Create a gateway checkout and local pending subscription.
+	 *
+	 * Only active products and active plans may enter checkout.
+	 * Redirect URLs are restricted to the site's own origin.
 	 *
 	 * @param array $data Checkout data.
 	 * @return array|\WP_Error
@@ -120,12 +150,39 @@ final class CreateSubscriptionCheckout {
 			);
 		}
 
+		/*
+		 * The checkout application is the final business-rule boundary.
+		 *
+		 * The frontend only displays active products/plans, but the REST
+		 * endpoint can be called directly. Never rely on the frontend to
+		 * enforce commercial availability.
+		 */
+		if ( ProductStatus::ACTIVE !== $product->get_status() ) {
+			return new \WP_Error(
+				'dropkey_checkout_product_unavailable',
+				__(
+					'The selected product is not currently available for purchase.',
+					'dropkey-wp'
+				)
+			);
+		}
+
 		$plan = $this->plans->find( $plan_id );
 
 		if ( ! $plan ) {
 			return new \WP_Error(
 				'dropkey_checkout_plan_not_found',
 				__( 'The plan does not exist.', 'dropkey-wp' )
+			);
+		}
+
+		if ( PlanStatus::ACTIVE !== $plan->get_status() ) {
+			return new \WP_Error(
+				'dropkey_checkout_plan_unavailable',
+				__(
+					'The selected plan is not currently available for purchase.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -158,17 +215,30 @@ final class CreateSubscriptionCheckout {
 			);
 		}
 
+		$return_url = isset( $data['return_url'] )
+			? esc_url_raw( $data['return_url'] )
+			: '';
+
+		$cancel_url = isset( $data['cancel_url'] )
+			? esc_url_raw( $data['cancel_url'] )
+			: '';
+
+		$redirect_validation = $this->validate_redirect_urls(
+			$return_url,
+			$cancel_url
+		);
+
+		if ( is_wp_error( $redirect_validation ) ) {
+			return $redirect_validation;
+		}
+
 		$context = array(
 			'customer'   => $customer,
 			'product'    => $product,
 			'plan'       => $plan,
 			'gateway'    => $gateway_id,
-			'return_url' => isset( $data['return_url'] )
-				? esc_url_raw( $data['return_url'] )
-				: '',
-			'cancel_url' => isset( $data['cancel_url'] )
-				? esc_url_raw( $data['cancel_url'] )
-				: '',
+			'return_url' => $return_url,
+			'cancel_url' => $cancel_url,
 		);
 
 		$result = $gateway->create_subscription_checkout( $context );
@@ -210,10 +280,11 @@ final class CreateSubscriptionCheckout {
 			);
 		}
 
-		$existing_subscription = $this->subscriptions->find_by_gateway_subscription_id(
-			$gateway_id,
-			$gateway_subscription_id
-		);
+		$existing_subscription =
+			$this->subscriptions->find_by_gateway_subscription_id(
+				$gateway_id,
+				$gateway_subscription_id
+			);
 
 		if ( $existing_subscription ) {
 			$result['gateway']            = $gateway_id;
@@ -232,7 +303,7 @@ final class CreateSubscriptionCheckout {
 		$subscription = new Subscription(
 			array(
 				'customer_id'             => $customer->get_id(),
-				'product_id'             => $product->get_id(),
+				'product_id'              => $product->get_id(),
 				'plan_id'                 => $plan->get_id(),
 				'gateway'                => $gateway_id,
 				'gateway_subscription_id' => $gateway_subscription_id,
@@ -266,11 +337,11 @@ final class CreateSubscriptionCheckout {
 				'plan_id'                 => $subscription->get_plan_id(),
 				'gateway'                => $subscription->get_gateway(),
 				'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
-				'status'                 => $subscription->get_status(),
-				'current_period_start'   => $subscription->get_current_period_start(),
-				'current_period_end'     => $subscription->get_current_period_end(),
-				'cancel_at_period_end'   => $subscription->get_cancel_at_period_end(),
-				'cancelled_at'           => $subscription->get_cancelled_at(),
+				'status'                  => $subscription->get_status(),
+				'current_period_start'    => $subscription->get_current_period_start(),
+				'current_period_end'      => $subscription->get_current_period_end(),
+				'cancel_at_period_end'    => $subscription->get_cancel_at_period_end(),
+				'cancelled_at'            => $subscription->get_cancelled_at(),
 				'past_due_at'             => null,
 				'ended_at'                => null,
 			)
@@ -283,10 +354,11 @@ final class CreateSubscriptionCheckout {
 			 * this insert. Recover the winner before compensating the
 			 * provider subscription.
 			 */
-			$existing_subscription = $this->subscriptions->find_by_gateway_subscription_id(
-				$gateway_id,
-				$gateway_subscription_id
-			);
+			$existing_subscription =
+				$this->subscriptions->find_by_gateway_subscription_id(
+					$gateway_id,
+					$gateway_subscription_id
+				);
 
 			if ( $existing_subscription ) {
 				$result['gateway']            = $gateway_id;
@@ -339,12 +411,139 @@ final class CreateSubscriptionCheckout {
 	}
 
 	/**
+	 * Validate checkout redirect URLs.
+	 *
+	 * Only URLs belonging to the site's configured origin are accepted.
+	 * Empty values remain valid because gateways may provide their own
+	 * defaults when no application return destination is supplied.
+	 *
+	 * @param string $return_url Return URL.
+	 * @param string $cancel_url Cancel URL.
+	 * @return true|\WP_Error
+	 */
+	private function validate_redirect_urls( $return_url, $cancel_url ) {
+		$urls = array(
+			'return_url' => $return_url,
+			'cancel_url' => $cancel_url,
+		);
+
+		$home_url = home_url( '/' );
+		$home     = wp_parse_url( $home_url );
+
+		if (
+			! is_array( $home )
+			|| empty( $home['host'] )
+		) {
+			return new \WP_Error(
+				'dropkey_checkout_redirect_origin_invalid',
+				__(
+					'The checkout return destination could not be validated.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		$allowed_host = strtolower(
+			rtrim(
+				(string) $home['host'],
+				'.'
+			)
+		);
+
+		$allowed_port = isset( $home['port'] )
+			? (int) $home['port']
+			: null;
+
+		$allowed_scheme = isset( $home['scheme'] )
+			? strtolower( (string) $home['scheme'] )
+			: '';
+
+		foreach ( $urls as $name => $url ) {
+			if ( '' === $url ) {
+				continue;
+			}
+
+			$parsed = wp_parse_url( $url );
+
+			if (
+				! is_array( $parsed )
+				|| empty( $parsed['host'] )
+			) {
+				return new \WP_Error(
+					'dropkey_checkout_' . $name . '_invalid',
+					__(
+						'The checkout redirect URL is invalid.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			$host = strtolower(
+				rtrim(
+					(string) $parsed['host'],
+					'.'
+				)
+			);
+
+			if ( $host !== $allowed_host ) {
+				return new \WP_Error(
+					'dropkey_checkout_' . $name . '_forbidden',
+					__(
+						'Checkout redirect URLs must belong to this website.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			if (
+				$allowed_scheme !== ''
+				&& isset( $parsed['scheme'] )
+				&& strtolower( (string) $parsed['scheme'] ) !== $allowed_scheme
+			) {
+				return new \WP_Error(
+					'dropkey_checkout_' . $name . '_forbidden',
+					__(
+						'Checkout redirect URLs must use this website\'s protocol.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			$parsed_port = isset( $parsed['port'] )
+				? (int) $parsed['port']
+				: null;
+
+			if ( $parsed_port !== $allowed_port ) {
+				return new \WP_Error(
+					'dropkey_checkout_' . $name . '_forbidden',
+					__(
+						'Checkout redirect URLs must use this website\'s origin.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			if ( isset( $parsed['user'] ) || isset( $parsed['pass'] ) ) {
+				return new \WP_Error(
+					'dropkey_checkout_' . $name . '_invalid',
+					__(
+						'Checkout redirect URLs may not contain embedded credentials.',
+						'dropkey-wp'
+					)
+				);
+			}
+		}
+
+		return true;
+	}
+
+	/**
 	 * Attempt to compensate for a provider subscription when local
 	 * subscription persistence cannot be completed.
 	 *
 	 * @param object    $gateway                  Payment gateway.
 	 * @param string    $gateway_subscription_id Provider subscription ID.
-	 * @param \WP_Error $local_error             Local persistence error.
+	 * @param \WP_Error $local_error              Local persistence error.
 	 * @param string    $gateway_id              Gateway ID.
 	 * @return void
 	 */
