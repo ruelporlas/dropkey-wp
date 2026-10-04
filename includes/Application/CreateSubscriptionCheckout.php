@@ -72,10 +72,10 @@ final class CreateSubscriptionCheckout {
 		PlanRepository $plans,
 		SubscriptionRepository $subscriptions
 	) {
-		$this->gateways       = $gateways;
-		$this->customers      = $customers;
-		$this->products       = $products;
-		$this->plans          = $plans;
+		$this->gateways      = $gateways;
+		$this->customers     = $customers;
+		$this->products      = $products;
+		$this->plans         = $plans;
 		$this->subscriptions = $subscriptions;
 	}
 
@@ -313,9 +313,9 @@ final class CreateSubscriptionCheckout {
 				'customer_id'             => $customer->get_id(),
 				'product_id'              => $product->get_id(),
 				'plan_id'                 => $plan->get_id(),
-				'gateway'                => $gateway_id,
+				'gateway'                 => $gateway_id,
 				'gateway_subscription_id' => $gateway_subscription_id,
-				'status'                 => Subscription::STATUS_PENDING,
+				'status'                  => Subscription::STATUS_PENDING,
 				'current_period_start'   => null,
 				'current_period_end'     => null,
 				'cancel_at_period_end'   => false,
@@ -343,9 +343,9 @@ final class CreateSubscriptionCheckout {
 				'customer_id'             => $subscription->get_customer_id(),
 				'product_id'              => $subscription->get_product_id(),
 				'plan_id'                 => $subscription->get_plan_id(),
-				'gateway'                => $subscription->get_gateway(),
+				'gateway'                 => $subscription->get_gateway(),
 				'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
-				'status'                 => $subscription->get_status(),
+				'status'                  => $subscription->get_status(),
 				'current_period_start'    => $subscription->get_current_period_start(),
 				'current_period_end'      => $subscription->get_current_period_end(),
 				'cancel_at_period_end'    => $subscription->get_cancel_at_period_end(),
@@ -471,11 +471,11 @@ final class CreateSubscriptionCheckout {
 					Subscription::STATUS_EXPIRED !== $existing_subscription->get_status()
 				) {
 					return array(
-						'gateway'              => 'free',
-						'free'                 => true,
-						'subscription_id'      => $existing_subscription->get_id(),
-						'local_subscription'   => $existing_subscription,
-						'approval_url'         => '',
+						'gateway'            => 'free',
+						'free'               => true,
+						'subscription_id'    => $existing_subscription->get_id(),
+						'local_subscription' => $existing_subscription,
+						'approval_url'       => '',
 					);
 				}
 			}
@@ -488,9 +488,9 @@ final class CreateSubscriptionCheckout {
 					'customer_id'             => $customer->get_id(),
 					'product_id'              => $product->get_id(),
 					'plan_id'                 => $plan->get_id(),
-					'gateway'                => 'free',
+					'gateway'                 => 'free',
 					'gateway_subscription_id' => $subscription_reference,
-					'status'                 => Subscription::STATUS_ACTIVE,
+					'status'                  => Subscription::STATUS_ACTIVE,
 					'current_period_start'   => $period_start,
 					'current_period_end'     => null,
 					'cancel_at_period_end'   => false,
@@ -511,45 +511,43 @@ final class CreateSubscriptionCheckout {
 					'customer_id'             => $subscription->get_customer_id(),
 					'product_id'              => $subscription->get_product_id(),
 					'plan_id'                 => $subscription->get_plan_id(),
-					'gateway'                => $subscription->get_gateway(),
+					'gateway'                 => $subscription->get_gateway(),
 					'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
-					'status'                 => $subscription->get_status(),
+					'status'                  => $subscription->get_status(),
 					'current_period_start'    => $subscription->get_current_period_start(),
 					'current_period_end'      => $subscription->get_current_period_end(),
 					'cancel_at_period_end'    => $subscription->get_cancel_at_period_end(),
 					'cancelled_at'            => $subscription->get_cancelled_at(),
 					'past_due_at'             => $subscription->get_past_due_at(),
-					'ended_at'                => $subscription->get_ended_at(),
+					'ended_at'               => $subscription->get_ended_at(),
 				)
 			);
 
 			if ( is_wp_error( $created_subscription ) ) {
-				/*
-				 * The unique gateway/reference combination makes the
-				 * generated reference collision-safe. A database
-				 * failure remains a real checkout failure.
-				 */
 				return $created_subscription;
 			}
 
 			/*
 			 * Reuse the normal lifecycle pipeline.
 			 *
-			 * Plugin.php already listens for this action and will:
+			 * Plugin.php listens for this action and will:
 			 * 1. create the license;
 			 * 2. synchronize the entitlement.
+			 *
+			 * The lifecycle contract expects the full Subscription
+			 * entity, not merely its database ID.
 			 */
 			do_action(
 				'dropkey_wp_subscription_activated',
-				$created_subscription->get_id()
+				$created_subscription
 			);
 
 			$result = array(
-				'gateway'              => 'free',
-				'free'                 => true,
-				'subscription_id'      => $created_subscription->get_id(),
-				'local_subscription'   => $created_subscription,
-				'approval_url'         => '',
+				'gateway'            => 'free',
+				'free'               => true,
+				'subscription_id'    => $created_subscription->get_id(),
+				'local_subscription' => $created_subscription,
+				'approval_url'       => '',
 			);
 
 			do_action(
