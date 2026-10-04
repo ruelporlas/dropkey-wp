@@ -28,14 +28,15 @@ class SubscriptionAdmin {
 		SubscriptionRepository $subscriptions,
 		CustomerRepository $customers,
 		ProductRepository $products,
-		PlanRepository $plans,
-		ChangeSubscriptionStatus $change_status
+		PlanRepository $plans
 	) {
 		$this->subscriptions = $subscriptions;
 		$this->customers     = $customers;
 		$this->products      = $products;
 		$this->plans         = $plans;
-		$this->change_status = $change_status;
+		$this->change_status = new ChangeSubscriptionStatus(
+			$subscriptions
+		);
 	}
 
 	public function register() {
@@ -76,7 +77,7 @@ class SubscriptionAdmin {
 	}
 
 	private function render_list() {
-		$status  = isset( $_GET['status'] )
+		$status = isset( $_GET['status'] )
 			? sanitize_key( wp_unslash( $_GET['status'] ) )
 			: '';
 
@@ -231,7 +232,6 @@ class SubscriptionAdmin {
 		$back_url = admin_url(
 			'admin.php?page=dropkey-wp-subscriptions'
 		);
-
 		?>
 		<div class="wrap dropkey-wp-subscription-detail">
 			<h1 class="wp-heading-inline">
@@ -559,4 +559,4 @@ class SubscriptionAdmin {
 		);
 	}
 }
-
+ 
