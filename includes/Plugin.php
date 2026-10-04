@@ -34,8 +34,6 @@ use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Frontend\ProductCheckout;
 use DropKeyWP\Gateways\GatewayManager;
-use DropKeyWP\Gateways\PayPal\PayPalGateway;
-use DropKeyWP\Gateways\PayPal\PayPalSettings;
 use DropKeyWP\REST\CheckoutController;
 use DropKeyWP\REST\LicenseController;
 use DropKeyWP\REST\WebhookController;
@@ -99,18 +97,6 @@ final class Plugin {
 
 		$gateway_manager = new GatewayManager();
 
-		$paypal_settings = PayPalSettings::get();
-
-		$paypal_gateway = new PayPalGateway(
-			$paypal_settings['client_id'],
-			$paypal_settings['client_secret'],
-			PayPalSettings::ENVIRONMENT_SANDBOX === $paypal_settings['environment'],
-			$gateway_mapping_repository,
-			$paypal_settings['webhook_id']
-		);
-
-		$gateway_manager->register_gateway( $paypal_gateway );
-
 		$create_customer = new CreateCustomer(
 			$customer_repository
 		);
@@ -138,7 +124,8 @@ final class Plugin {
 		$create_license = new CreateLicense(
 			$license_repository,
 			$subscription_repository,
-			$product_repository
+			$product_repository,
+			$plan_repository
 		);
 
 		$activate_subscription = new ActivateSubscription(
@@ -258,4 +245,3 @@ final class Plugin {
 		}
 	}
 }
-
