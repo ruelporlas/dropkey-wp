@@ -9,6 +9,8 @@ namespace DropKeyWP\Application;
 
 use DropKeyWP\Database\Repositories\GatewayEventRepository;
 use DropKeyWP\Database\Repositories\LicenseRepository;
+use DropKeyWP\Database\Repositories\PlanRepository;
+use DropKeyWP\Database\Repositories\ProductRepository;
 use DropKeyWP\Database\Repositories\SubscriptionRepository;
 use DropKeyWP\Domain\GatewayEvent;
 use DropKeyWP\Domain\Subscription;
@@ -29,6 +31,8 @@ final class ProcessPaymentEvent {
 
 	private $change_status;
 
+	private $create_license;
+
 	private $synchronize_entitlement;
 
 	public function __construct(
@@ -46,6 +50,25 @@ final class ProcessPaymentEvent {
 
 		$this->change_status = new ChangeSubscriptionStatus(
 			$subscriptions
+		);
+
+		/*
+		 * ProcessPaymentEvent intentionally keeps its existing four-argument
+		 * constructor so existing Plugin bootstrap code remains compatible.
+		 *
+		 * CreateLicense needs the product and plan repositories, so construct
+		 * those repositories from the current WordPress database connection.
+		 */
+		global $wpdb;
+
+		$product_repository = new ProductRepository( $wpdb );
+		$plan_repository    = new PlanRepository( $wpdb );
+
+		$this->create_license = new CreateLicense(
+			$licenses,
+			$subscriptions,
+			$product_repository,
+			$plan_repository
 		);
 
 		$this->synchronize_entitlement =
@@ -460,8 +483,7 @@ final class ProcessPaymentEvent {
 		/*
 		 * Change the subscription status before synchronizing the
 		 * entitlement. The lifecycle action fired by ChangeSubscriptionStatus
-		 * receives the newly persisted subscription state, ensuring that
-		 * suspended and expired subscriptions correctly update their license.
+		 * receives the newly persisted subscription state.
 		 */
 		if ( $subscription->get_status() !== $status ) {
 			$result = $this->change_status->execute(
@@ -473,15 +495,80 @@ final class ProcessPaymentEvent {
 				return $result;
 			}
 
+			/*
+			 * WordPress actions do not return callback errors. Therefore
+			 * explicitly ensure an ACTIVE subscription has a license before
+			 * the gateway event is marked as successfully processed.
+			 *
+			 * CreateLicense is idempotent, so this is safe even when the
+			 * activation lifecycle hook already created the license.
+			 */
+			if ( Subscription::STATUS_ACTIVE === $status ) {
+				$license = $this->create_license->execute(
+					$subscription->get_id()
+				);
+
+				if ( is_wp_error( $license ) ) {
+					return $license;
+				}
+			}
+
+			$subscription = $this->subscriptions->find(
+				$subscription->get_id()
+			);
+
+			if ( ! $subscription ) {
+				return new \WP_Error(
+					'dropkey_subscription_reload_failed',
+					__(
+						'The subscription could not be reloaded after its status was changed.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			$entitlement = $this->synchronize_entitlement->execute(
+				$subscription
+			);
+
+			if ( is_wp_error( $entitlement ) ) {
+				return $entitlement;
+			}
+
 			return true;
 		}
 
 		/*
 		 * When the status does not change, there is no lifecycle action
-		 * to synchronize the entitlement. This is the normal renewal
-		 * path: the billing period changes while the subscription remains
-		 * ACTIVE, so synchronize the license explicitly.
+		 * to synchronize the entitlement. This is the normal renewal path:
+		 * the billing period changes while the subscription remains ACTIVE.
+		 *
+		 * Ensure the license exists before synchronizing the entitlement.
 		 */
+		if ( Subscription::STATUS_ACTIVE === $status ) {
+			$license = $this->create_license->execute(
+				$subscription->get_id()
+			);
+
+			if ( is_wp_error( $license ) ) {
+				return $license;
+			}
+		}
+
+		$subscription = $this->subscriptions->find(
+			$subscription->get_id()
+		);
+
+		if ( ! $subscription ) {
+			return new \WP_Error(
+				'dropkey_subscription_reload_failed',
+				__(
+					'The subscription could not be reloaded before entitlement synchronization.',
+					'dropkey-wp'
+				)
+			);
+		}
+
 		$entitlement = $this->synchronize_entitlement->execute(
 			$subscription
 		);
@@ -680,3 +767,4 @@ final class ProcessPaymentEvent {
 			: '';
 	}
 }
+

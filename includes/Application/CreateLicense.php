@@ -70,8 +70,12 @@ final class CreateLicense {
 	 * Create a license for an active subscription.
 	 *
 	 * This operation is idempotent and serialized per subscription.
-	 * The lock prevents two concurrent lifecycle events from both
+	 * The lock prevents concurrent lifecycle events from both
 	 * observing that no license exists and creating separate licenses.
+	 *
+	 * The subscription is reloaded after acquiring the lock so that
+	 * license creation always uses the latest persisted subscription
+	 * state.
 	 *
 	 * @param int $subscription_id Subscription ID.
 	 * @return License|\WP_Error
@@ -136,7 +140,7 @@ final class CreateLicense {
 
 		try {
 			/*
-			 * Re-check after acquiring the lock.
+			 * Re-check the license after acquiring the lock.
 			 *
 			 * Another request may have created the license while this
 			 * request was waiting for the lock.
@@ -147,6 +151,34 @@ final class CreateLicense {
 
 			if ( $existing_license ) {
 				return $existing_license;
+			}
+
+			/*
+			 * Reload the subscription after acquiring the lock.
+			 *
+			 * The subscription may have changed while this request was
+			 * waiting. Never create an active license from a stale
+			 * subscription object.
+			 */
+			$subscription = $this->subscriptions->find(
+				$subscription_id
+			);
+
+			if ( ! $subscription ) {
+				return new \WP_Error(
+					'dropkey_license_subscription_not_found',
+					__( 'The subscription does not exist.', 'dropkey-wp' )
+				);
+			}
+
+			if ( Subscription::STATUS_ACTIVE !== $subscription->get_status() ) {
+				return new \WP_Error(
+					'dropkey_license_subscription_not_active',
+					__(
+						'A license can only be created for an active subscription.',
+						'dropkey-wp'
+					)
+				);
 			}
 
 			$product = $this->products->find(
@@ -174,7 +206,10 @@ final class CreateLicense {
 			if ( $plan->get_product_id() !== $product->get_id() ) {
 				return new \WP_Error(
 					'dropkey_license_product_plan_mismatch',
-					__( 'The subscription product and plan do not match.', 'dropkey-wp' )
+					__(
+						'The subscription product and plan do not match.',
+						'dropkey-wp'
+					)
 				);
 			}
 
@@ -286,4 +321,3 @@ final class CreateLicense {
 		);
 	}
 }
-
