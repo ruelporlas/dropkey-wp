@@ -306,26 +306,172 @@ final class SubscriptionRepository {
 	/**
 	 * Update subscription status.
 	 *
+	 * Lifecycle timestamps are recorded here so every status-changing
+	 * workflow uses the same persistence rules.
+	 *
 	 * @param int    $id     Subscription ID.
 	 * @param string $status Subscription status.
 	 * @return true|\WP_Error
 	 */
 	public function update_status( $id, $status ) {
+		$id         = absint( $id );
+		$status     = (string) $status;
 		$updated_at = current_time( 'mysql', true );
+
+		$data = array(
+			'status'     => $status,
+			'updated_at' => $updated_at,
+		);
+
+		$formats = array(
+			'%s',
+			'%s',
+		);
+
+		/*
+		 * Record the first time a subscription enters a terminal
+		 * lifecycle state. Existing timestamps are intentionally
+		 * preserved if the method is called again for the same state.
+		 */
+		if ( Subscription::STATUS_CANCELLED === $status ) {
+			$data['cancelled_at'] = $updated_at;
+			$formats[]            = '%s';
+
+			$updated = $this->wpdb->update(
+				$this->table,
+				$data,
+				array(
+					'id'              => $id,
+					'cancelled_at'    => null,
+				),
+				$formats,
+				array(
+					'%d',
+					'%s',
+				)
+			);
+
+			if ( false === $updated ) {
+				return new \WP_Error(
+					'dropkey_subscription_update_failed',
+					__( 'The subscription could not be updated.', 'dropkey-wp' ),
+					array(
+						'db_error' => $this->wpdb->last_error,
+					)
+				);
+			}
+
+			if ( 0 === $updated ) {
+				$data = array(
+					'status'     => $status,
+					'updated_at' => $updated_at,
+				);
+
+				$updated = $this->wpdb->update(
+					$this->table,
+					$data,
+					array(
+						'id' => $id,
+					),
+					array(
+						'%s',
+						'%s',
+					),
+					array(
+						'%d',
+					)
+				);
+
+				if ( false === $updated ) {
+					return new \WP_Error(
+						'dropkey_subscription_update_failed',
+						__(
+							'The subscription could not be updated.',
+							'dropkey-wp'
+						),
+						array(
+							'db_error' => $this->wpdb->last_error,
+						)
+					);
+				}
+			}
+
+			return true;
+		}
+
+		if ( Subscription::STATUS_EXPIRED === $status ) {
+			$data['ended_at'] = $updated_at;
+			$formats[]       = '%s';
+
+			$updated = $this->wpdb->update(
+				$this->table,
+				$data,
+				array(
+					'id'       => $id,
+					'ended_at' => null,
+				),
+				$formats,
+				array(
+					'%d',
+					'%s',
+				)
+			);
+
+			if ( false === $updated ) {
+				return new \WP_Error(
+					'dropkey_subscription_update_failed',
+					__( 'The subscription could not be updated.', 'dropkey-wp' ),
+					array(
+						'db_error' => $this->wpdb->last_error,
+					)
+				);
+			}
+
+			if ( 0 === $updated ) {
+				$data = array(
+					'status'     => $status,
+					'updated_at' => $updated_at,
+				);
+
+				$updated = $this->wpdb->update(
+					$this->table,
+					$data,
+					array(
+						'id' => $id,
+					),
+					array(
+						'%s',
+						'%s',
+					),
+					array(
+						'%d',
+					)
+				);
+
+				if ( false === $updated ) {
+					return new \WP_Error(
+						'dropkey_subscription_update_failed',
+						__(
+							'The subscription could not be updated.',
+							'dropkey-wp'
+						),
+						array(
+							'db_error' => $this->wpdb->last_error,
+						)
+					);
+				}
+			}
+
+			return true;
+		}
 
 		$updated = $this->wpdb->update(
 			$this->table,
+			$data,
 			array(
-				'status'     => $status,
-				'updated_at' => $updated_at,
+				'id' => $id,
 			),
-			array(
-				'id' => absint( $id ),
-			),
-			array(
-				'%s',
-				'%s',
-			),
+			$formats,
 			array(
 				'%d',
 			)
