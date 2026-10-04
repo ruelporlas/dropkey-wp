@@ -59,6 +59,11 @@ final class PlanAdmin {
 		);
 
 		add_action(
+			'admin_head',
+			array( $this, 'hide_edit_plan_menu_item' )
+		);
+
+		add_action(
 			'admin_post_dropkey_wp_create_plan',
 			array( $this, 'handle_create_plan' )
 		);
@@ -99,13 +104,30 @@ final class PlanAdmin {
 		);
 
 		add_submenu_page(
-			'options.php',
+			'dropkey-wp-products',
 			__( 'Edit Plan', 'dropkey-wp' ),
 			__( 'Edit Plan', 'dropkey-wp' ),
 			'manage_options',
 			'dropkey-wp-plan-edit',
 			array( $this, 'render_edit_plan_page' )
 		);
+	}
+
+	/**
+	 * Hide the Edit Plan submenu item from the sidebar.
+	 *
+	 * The page remains registered and accessible through direct URLs.
+	 *
+	 * @return void
+	 */
+	public function hide_edit_plan_menu_item() {
+		?>
+		<style>
+			#toplevel_page_dropkey-wp-products .wp-submenu a[href*="page=dropkey-wp-plan-edit"] {
+				display: none;
+			}
+		</style>
+		<?php
 	}
 
 	/**
@@ -398,12 +420,15 @@ final class PlanAdmin {
 				<?php endforeach; ?>
 			</select>
 
-			<?php submit_button(
+			<?php
+			submit_button(
 				__( 'View Plans', 'dropkey-wp' ),
 				'secondary',
 				'submit',
 				false
-			); ?>
+			);
+			?>
+
 		</form>
 
 		<br />
@@ -422,9 +447,9 @@ final class PlanAdmin {
 		$current_status
 	) {
 		$filters = array(
-			''                     => __( 'All', 'dropkey-wp' ),
-			PlanStatus::ACTIVE     => __( 'Active', 'dropkey-wp' ),
-			PlanStatus::ARCHIVED   => __( 'Archived', 'dropkey-wp' ),
+			''                   => __( 'All', 'dropkey-wp' ),
+			PlanStatus::ACTIVE   => __( 'Active', 'dropkey-wp' ),
+			PlanStatus::ARCHIVED => __( 'Archived', 'dropkey-wp' ),
 		);
 
 		?>
@@ -1102,7 +1127,7 @@ final class PlanAdmin {
 						'plan_id' => $plan_id,
 						'error'   => $error_token,
 					),
-					admin_url( 'options.php' )
+					admin_url( 'admin.php' )
 				)
 			);
 
@@ -1116,7 +1141,7 @@ final class PlanAdmin {
 					'plan_id' => $plan_id,
 					'updated' => '1',
 				),
-				admin_url( 'options.php' )
+				admin_url( 'admin.php' )
 			)
 		);
 
@@ -1153,11 +1178,19 @@ final class PlanAdmin {
 		);
 
 		if ( is_wp_error( $result ) ) {
+			$product_id = 0;
+			$plan       = $this->plans->find( $plan_id );
+
+			if ( $plan ) {
+				$product_id = $plan->get_product_id();
+			}
+
 			wp_safe_redirect(
 				add_query_arg(
 					array(
-						'page'  => 'dropkey-wp-plans',
-						'error' => 'status_change',
+						'page'       => 'dropkey-wp-plans',
+						'product_id' => $product_id,
+						'error'      => 'status_change',
 					),
 					admin_url( 'admin.php' )
 				)
@@ -1173,8 +1206,8 @@ final class PlanAdmin {
 		wp_safe_redirect(
 			add_query_arg(
 				array(
-					'page'       => 'dropkey-wp-plans',
-					'product_id' => $result->get_product_id(),
+					'page'          => 'dropkey-wp-plans',
+					'product_id'    => $result->get_product_id(),
 					'status_notice' => $notice,
 				),
 				admin_url( 'admin.php' )
@@ -1481,7 +1514,7 @@ final class PlanAdmin {
 				'page'    => 'dropkey-wp-plan-edit',
 				'plan_id' => absint( $plan_id ),
 			),
-			admin_url( 'options.php' )
+			admin_url( 'admin.php' )
 		);
 	}
 
@@ -1622,4 +1655,4 @@ final class PlanAdmin {
 			)
 		);
 	}
-} 
+}

@@ -9,6 +9,7 @@ namespace DropKeyWP;
 
 use DropKeyWP\Admin\CustomerAdmin;
 use DropKeyWP\Admin\LicenseAdmin;
+use DropKeyWP\Admin\PlanAdmin;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
@@ -229,6 +230,13 @@ final class Plugin {
 			);
 
 			$product_admin->register();
+
+			$plan_admin = new PlanAdmin(
+				$plan_repository,
+				$product_repository
+			);
+
+			$plan_admin->register();
 
 			$customer_admin = new CustomerAdmin(
 				$customer_repository
