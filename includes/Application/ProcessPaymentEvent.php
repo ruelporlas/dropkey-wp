@@ -224,9 +224,9 @@ final class ProcessPaymentEvent {
 				$processing->get_error_code()
 			) {
 				/*
-				 * Another request owns this event. The webhook has already
-				 * been durably recorded, so acknowledge it with a successful
-				 * result rather than causing the provider to retry it.
+				 * Another request owns this event. The event is already
+				 * durably recorded, so acknowledge the webhook instead
+				 * of causing the provider to retry it unnecessarily.
 				 */
 				return $record;
 			}
@@ -334,7 +334,7 @@ final class ProcessPaymentEvent {
 	 *
 	 * @param string $gateway    Gateway ID.
 	 * @param string $event_type Gateway event type.
-	 * @param array  $payload    Decoded event payload.
+	 * @param array  $payload    Decoded gateway payload.
 	 * @return true|\WP_Error
 	 */
 	private function process_subscription_event(
@@ -365,10 +365,11 @@ final class ProcessPaymentEvent {
 			);
 		}
 
-		$subscription = $this->subscriptions->find_by_gateway_subscription_id(
-			$gateway,
-			$gateway_subscription_id
-		);
+		$subscription =
+			$this->subscriptions->find_by_gateway_subscription_id(
+				$gateway,
+				$gateway_subscription_id
+			);
 
 		if ( ! $subscription ) {
 			return new \WP_Error(
@@ -382,8 +383,8 @@ final class ProcessPaymentEvent {
 
 		/*
 		 * PayPal webhook delivery is at-least-once and events can arrive
-		 * out of order. The webhook payload tells us what happened, but
-		 * PayPal's current subscription resource tells us what is true now.
+		 * out of order. The event describes what happened, while the
+		 * current subscription resource describes the provider's state now.
 		 */
 		$gateway_instance = $this->gateways->get(
 			$gateway
@@ -419,7 +420,6 @@ final class ProcessPaymentEvent {
 
 		$status = $this->resolve_remote_status(
 			$event_type,
-			$payload,
 			$remote_subscription
 		);
 
@@ -467,9 +467,9 @@ final class ProcessPaymentEvent {
 
 		if ( $subscription->get_status() === $status ) {
 			/*
-			 * A renewal can keep the subscription active while changing
-			 * the billing period, so the period synchronization above still
-			 * matters even when the lifecycle status is unchanged.
+			 * A successful renewal can leave the subscription ACTIVE
+			 * while extending its billing period. The period and
+			 * entitlement were therefore synchronized above first.
 			 */
 			return true;
 		}
@@ -487,21 +487,14 @@ final class ProcessPaymentEvent {
 	}
 
 	/**
-	 * Resolve the local status from the provider's current state.
-	 *
-	 * Payment failure is special because PayPal can keep the subscription
-	 * ACTIVE while a payment is temporarily failing. In that situation,
-	 * the latest failed-payment information determines whether the local
-	 * state should be past due.
+	 * Resolve local status from the provider's current subscription state.
 	 *
 	 * @param string $event_type        Event type.
-	 * @param array  $event_payload     Original event payload.
 	 * @param array  $remote_subscription Current provider resource.
 	 * @return string|\WP_Error
 	 */
 	private function resolve_remote_status(
 		$event_type,
-		array $event_payload,
 		array $remote_subscription
 	) {
 		$remote_status = isset( $remote_subscription['status'] )
@@ -518,10 +511,6 @@ final class ProcessPaymentEvent {
 					'BILLING.SUBSCRIPTION.PAYMENT.FAILED' ===
 					$event_type
 				) {
-					$event_time = $this->get_event_time(
-						$event_payload
-					);
-
 					$billing_info = isset(
 						$remote_subscription['billing_info']
 					) && is_array(
@@ -530,49 +519,24 @@ final class ProcessPaymentEvent {
 						? $remote_subscription['billing_info']
 						: array();
 
-					$last_payment_time =
-						isset(
-							$billing_info['last_payment']['time']
+					$failed_payments_count = isset(
+						$billing_info['failed_payments_count']
+					)
+						? absint(
+							$billing_info['failed_payments_count']
 						)
-						? (string) $billing_info['last_payment']['time']
-						: '';
-
-					$last_failed_payment_time =
-						isset(
-							$billing_info['last_failed_payment']['time']
-						)
-						? (string) $billing_info['last_failed_payment']['time']
-						: '';
+						: 0;
 
 					/*
-					 * A later successful payment supersedes an older
-					 * failure, even if the failure webhook arrives late.
+					 * PayPal resets the failed-payment count after a
+					 * successful payment. This makes the current provider
+					 * state safer than comparing webhook timestamps.
 					 */
-					if (
-						'' !== $event_time
-						&& '' !== $last_payment_time
-						&& $this->datetime_is_after(
-							$last_payment_time,
-							$event_time
-						)
-					) {
-						return Subscription::STATUS_ACTIVE;
-					}
-
-					if (
-						'' !== $last_failed_payment_time
-						&& (
-							'' === $event_time
-							|| ! $this->datetime_is_before(
-								$last_failed_payment_time,
-								$event_time
-							)
-						)
-					) {
+					if ( $failed_payments_count > 0 ) {
 						return Subscription::STATUS_PAST_DUE;
 					}
 
-					return Subscription::STATUS_PAST_DUE;
+					return Subscription::STATUS_ACTIVE;
 				}
 
 				return Subscription::STATUS_ACTIVE;
@@ -607,7 +571,7 @@ final class ProcessPaymentEvent {
 	/**
 	 * Get the current provider billing period.
 	 *
-	 * @param array $remote_subscription Current provider subscription.
+	 * @param array $remote_subscription Current provider resource.
 	 * @return array|false
 	 */
 	private function get_remote_subscription_period(
@@ -659,65 +623,6 @@ final class ProcessPaymentEvent {
 			'start' => $period_start,
 			'end'   => $period_end,
 		);
-	}
-
-	/**
-	 * Get the event creation time.
-	 *
-	 * @param array $payload Event payload.
-	 * @return string
-	 */
-	private function get_event_time( array $payload ) {
-		if (
-			empty( $payload['create_time'] )
-			|| ! is_string( $payload['create_time'] )
-		) {
-			return '';
-		}
-
-		return trim( $payload['create_time'] );
-	}
-
-	/**
-	 * Determine whether one RFC3339 datetime is after another.
-	 *
-	 * @param string $first  First datetime.
-	 * @param string $second Second datetime.
-	 * @return bool
-	 */
-	private function datetime_is_after( $first, $second ) {
-		$first_timestamp  = strtotime( $first );
-		$second_timestamp = strtotime( $second );
-
-		if (
-			false === $first_timestamp
-			|| false === $second_timestamp
-		) {
-			return false;
-		}
-
-		return $first_timestamp > $second_timestamp;
-	}
-
-	/**
-	 * Determine whether one RFC3339 datetime is before another.
-	 *
-	 * @param string $first  First datetime.
-	 * @param string $second Second datetime.
-	 * @return bool
-	 */
-	private function datetime_is_before( $first, $second ) {
-		$first_timestamp  = strtotime( $first );
-		$second_timestamp = strtotime( $second );
-
-		if (
-			false === $first_timestamp
-			|| false === $second_timestamp
-		) {
-			return false;
-		}
-
-		return $first_timestamp < $second_timestamp;
 	}
 
 	/**
