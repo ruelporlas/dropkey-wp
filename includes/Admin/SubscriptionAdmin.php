@@ -1195,10 +1195,10 @@ final class SubscriptionAdmin {
 		$current_gateway
 	) {
 		$filters = array(
-			''                            => __( 'All', 'dropkey-wp' ),
-			Subscription::STATUS_ACTIVE   => __( 'Active', 'dropkey-wp' ),
-			Subscription::STATUS_PENDING  => __( 'Pending', 'dropkey-wp' ),
-			Subscription::STATUS_PAST_DUE => __( 'Past Due', 'dropkey-wp' ),
+			''                             => __( 'All', 'dropkey-wp' ),
+			Subscription::STATUS_ACTIVE    => __( 'Active', 'dropkey-wp' ),
+			Subscription::STATUS_PENDING   => __( 'Pending', 'dropkey-wp' ),
+			Subscription::STATUS_PAST_DUE  => __( 'Past Due', 'dropkey-wp' ),
 			Subscription::STATUS_SUSPENDED => __( 'Suspended', 'dropkey-wp' ),
 			Subscription::STATUS_CANCELLED => __( 'Cancelled', 'dropkey-wp' ),
 			Subscription::STATUS_EXPIRED   => __( 'Expired', 'dropkey-wp' ),
@@ -1488,6 +1488,15 @@ final class SubscriptionAdmin {
 				margin-bottom: 20px;
 			}
 
+			.dropkey-wp-subscription-detail .postbox-header {
+				padding: 0 12px;
+			}
+
+			.dropkey-wp-subscription-detail .postbox-header h2 {
+				padding: 10px 0;
+				margin: 0;
+			}
+
 			.dropkey-wp-subscription-detail .inside {
 				margin: 0;
 			}
@@ -1767,8 +1776,8 @@ final class SubscriptionAdmin {
 					'You do not have permission to manage subscriptions.',
 					'dropkey-wp'
 				)
-			); 
+			);
 		}
 	}
 }
- 
+
