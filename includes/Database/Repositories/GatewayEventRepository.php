@@ -112,6 +112,56 @@ final class GatewayEventRepository {
 	}
 
 	/**
+	 * Atomically claim a received event for processing.
+	 *
+	 * Only one concurrent request can successfully change the event
+	 * from received to processing.
+	 *
+	 * @param int $id Event ID.
+	 * @return true|\WP_Error
+	 */
+	public function claim_for_processing( $id ) {
+		$updated = $this->wpdb->query(
+			$this->wpdb->prepare(
+				"UPDATE {$this->table}
+				SET status = %s,
+					updated_at = %s
+				WHERE id = %d
+				AND status = %s",
+				GatewayEvent::STATUS_PROCESSING,
+				current_time( 'mysql', true ),
+				absint( $id ),
+				GatewayEvent::STATUS_RECEIVED
+			)
+		);
+
+		if ( false === $updated ) {
+			return new \WP_Error(
+				'dropkey_gateway_event_claim_failed',
+				__(
+					'The gateway event could not be claimed for processing.',
+					'dropkey-wp'
+				),
+				array(
+					'db_error' => $this->wpdb->last_error,
+				)
+			);
+		}
+
+		if ( 1 !== (int) $updated ) {
+			return new \WP_Error(
+				'dropkey_gateway_event_already_processing',
+				__(
+					'The gateway event is already being processed or is no longer available for processing.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		return true;
+	}
+
+	/**
 	 * Update event status.
 	 *
 	 * @param int         $id            Event ID.

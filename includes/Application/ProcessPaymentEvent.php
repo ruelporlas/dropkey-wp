@@ -27,22 +27,15 @@ final class ProcessPaymentEvent {
 
 	private $synchronize_entitlement;
 
-	/**
-	 * Constructor.
-	 *
-	 * @param GatewayEventRepository $events        Gateway event repository.
-	 * @param SubscriptionRepository $subscriptions Subscription repository.
-	 * @param LicenseRepository      $licenses      License repository.
-	 */
 	public function __construct(
 		GatewayEventRepository $events,
 		SubscriptionRepository $subscriptions,
 		LicenseRepository $licenses
 	) {
-		$this->events                 = $events;
-		$this->subscriptions          = $subscriptions;
-		$this->licenses               = $licenses;
-		$this->change_status          = new ChangeSubscriptionStatus(
+		$this->events                  = $events;
+		$this->subscriptions           = $subscriptions;
+		$this->licenses                = $licenses;
+		$this->change_status           = new ChangeSubscriptionStatus(
 			$subscriptions
 		);
 		$this->synchronize_entitlement = new SynchronizeSubscriptionEntitlement(
@@ -57,11 +50,11 @@ final class ProcessPaymentEvent {
 	 * @return GatewayEvent|WP_Error
 	 */
 	public function execute( array $event ) {
-		$gateway    = isset( $event['gateway'] )
+		$gateway = isset( $event['gateway'] )
 			? sanitize_key( $event['gateway'] )
 			: '';
 
-		$event_id   = isset( $event['event_id'] )
+		$event_id = isset( $event['event_id'] )
 			? sanitize_text_field( $event['event_id'] )
 			: '';
 
@@ -87,6 +80,8 @@ final class ProcessPaymentEvent {
 			);
 		}
 
+		$payload_hash = hash( 'sha256', $payload );
+
 		$record = $this->events->find_by_gateway_event(
 			$gateway,
 			$event_id
@@ -98,11 +93,21 @@ final class ProcessPaymentEvent {
 			}
 
 			/*
+			 * A provider event ID must represent one immutable payload.
+			 * Do not process a different payload under an existing event ID.
+			 */
+			if ( $record->get_payload_hash() !== $payload_hash ) {
+				return new \WP_Error(
+					'dropkey_gateway_event_payload_mismatch',
+					__(
+						'The gateway event payload does not match the previously recorded event.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			/*
 			 * A previously failed event may safely be processed again.
-			 *
-			 * Processing events are intentionally not reset here. This
-			 * prevents a concurrent duplicate delivery from taking over
-			 * an event that another request is already processing.
 			 */
 			if ( GatewayEvent::STATUS_FAILED === $record->get_status() ) {
 				$reset = $this->events->reset_for_retry(
@@ -112,10 +117,23 @@ final class ProcessPaymentEvent {
 				if ( is_wp_error( $reset ) ) {
 					return $reset;
 				}
+
+				$record = $this->events->find_by_gateway_event(
+					$gateway,
+					$event_id
+				);
+
+				if ( ! $record ) {
+					return new \WP_Error(
+						'dropkey_gateway_event_reload_failed',
+						__(
+							'The gateway event could not be reloaded for retry.',
+							'dropkey-wp'
+						)
+					);
+				}
 			}
 		} else {
-			$payload_hash = hash( 'sha256', $payload );
-
 			$record = $this->events->create(
 				array(
 					'gateway'      => $gateway,
@@ -152,6 +170,16 @@ final class ProcessPaymentEvent {
 					return $record;
 				}
 
+				if ( $record->get_payload_hash() !== $payload_hash ) {
+					return new \WP_Error(
+						'dropkey_gateway_event_payload_mismatch',
+						__(
+							'The gateway event payload does not match the previously recorded event.',
+							'dropkey-wp'
+						)
+					);
+				}
+
 				if ( GatewayEvent::STATUS_FAILED === $record->get_status() ) {
 					$reset = $this->events->reset_for_retry(
 						$record->get_id()
@@ -160,34 +188,51 @@ final class ProcessPaymentEvent {
 					if ( is_wp_error( $reset ) ) {
 						return $reset;
 					}
+
+					$record = $this->events->find_by_gateway_event(
+						$gateway,
+						$event_id
+					);
+
+					if ( ! $record ) {
+						return new \WP_Error(
+							'dropkey_gateway_event_reload_failed',
+							__(
+								'The gateway event could not be reloaded for retry.',
+								'dropkey-wp'
+							)
+						);
+					}
 				}
 			}
 		}
 
 		/*
-		 * If another request is already processing this event, do not
-		 * process it a second time.
+		 * Claim the event atomically. Only one concurrent request can
+		 * change received -> processing.
 		 */
-		if ( GatewayEvent::STATUS_PROCESSING === $record->get_status() ) {
-			return new \WP_Error(
-				'dropkey_gateway_event_processing',
-				__(
-					'The gateway event is already being processed.',
-					'dropkey-wp'
-				)
-			);
-		}
-
-		$processing = $this->events->update_status(
-			$record->get_id(),
-			GatewayEvent::STATUS_PROCESSING
+		$processing = $this->events->claim_for_processing(
+			$record->get_id()
 		);
 
 		if ( is_wp_error( $processing ) ) {
+			if (
+				'dropkey_gateway_event_already_processing' ===
+				$processing->get_error_code()
+			) {
+				return new \WP_Error(
+					'dropkey_gateway_event_processing',
+					__(
+						'The gateway event is already being processed.',
+						'dropkey-wp'
+					)
+				);
+			}
+
 			return $processing;
 		}
 
-		$decoded = json_decode( $payload, true );
+		$decoded = json_decode( $record->get_payload(), true );
 
 		if ( ! is_array( $decoded ) ) {
 			$error = new \WP_Error(
@@ -215,7 +260,7 @@ final class ProcessPaymentEvent {
 
 		$result = $this->process_subscription_event(
 			$gateway,
-			$event_type,
+			$record->get_event_type(),
 			$decoded
 		);
 
@@ -273,10 +318,6 @@ final class ProcessPaymentEvent {
 		$status = $this->map_event_to_status( $event_type );
 
 		if ( '' === $status ) {
-			/*
-			 * The event is valid but does not currently change the
-			 * DropKey subscription lifecycle.
-			 */
 			return true;
 		}
 
@@ -314,13 +355,6 @@ final class ProcessPaymentEvent {
 			);
 		}
 
-		/*
-		 * Synchronize the billing period whenever the gateway event
-		 * contains a complete current-period representation.
-		 *
-		 * This is intentionally performed before entitlement
-		 * synchronization and the status transition.
-		 */
 		$period = $this->get_subscription_period(
 			$gateway,
 			$event_type,
@@ -342,10 +376,6 @@ final class ProcessPaymentEvent {
 				return $period_result;
 			}
 
-			/*
-			 * Reload the subscription so entitlement synchronization
-			 * receives the newly persisted billing period.
-			 */
 			$subscription = $this->subscriptions->find(
 				$subscription->get_id()
 			);
@@ -360,12 +390,6 @@ final class ProcessPaymentEvent {
 				);
 			}
 
-			/*
-			 * A payment-success event may arrive while the subscription
-			 * is already active. In that case ChangeSubscriptionStatus
-			 * intentionally does nothing, so entitlement synchronization
-			 * must happen here to advance the license expiry.
-			 */
 			$entitlement = $this->synchronize_entitlement->execute(
 				$subscription
 			);
@@ -375,14 +399,6 @@ final class ProcessPaymentEvent {
 			}
 		}
 
-		/*
-		 * If the subscription is already in the requested state, the
-		 * event has nothing further to change.
-		 *
-		 * Period and entitlement synchronization above still occur
-		 * because an already-active event may contain newer billing
-		 * information.
-		 */
 		if ( $subscription->get_status() === $status ) {
 			return true;
 		}
@@ -401,11 +417,6 @@ final class ProcessPaymentEvent {
 
 	/**
 	 * Extract the current billing period from a gateway resource.
-	 *
-	 * PayPal's subscription resource uses:
-	 * - start_time for the initial subscription period.
-	 * - billing_info.last_payment.time for subsequent paid periods.
-	 * - billing_info.next_billing_time for the current period end.
 	 *
 	 * @param string $gateway    Gateway ID.
 	 * @param string $event_type Gateway event type.
@@ -507,12 +518,12 @@ final class ProcessPaymentEvent {
 	 */
 	private function map_event_to_status( $event_type ) {
 		$map = array(
-			'BILLING.SUBSCRIPTION.ACTIVATED'         => Subscription::STATUS_ACTIVE,
+			'BILLING.SUBSCRIPTION.ACTIVATED'          => Subscription::STATUS_ACTIVE,
 			'BILLING.SUBSCRIPTION.PAYMENT.SUCCEEDED' => Subscription::STATUS_ACTIVE,
 			'BILLING.SUBSCRIPTION.PAYMENT.FAILED'    => Subscription::STATUS_PAST_DUE,
-			'BILLING.SUBSCRIPTION.SUSPENDED'        => Subscription::STATUS_SUSPENDED,
-			'BILLING.SUBSCRIPTION.CANCELLED'        => Subscription::STATUS_CANCELLED,
-			'BILLING.SUBSCRIPTION.EXPIRED'          => Subscription::STATUS_EXPIRED,
+			'BILLING.SUBSCRIPTION.SUSPENDED'         => Subscription::STATUS_SUSPENDED,
+			'BILLING.SUBSCRIPTION.CANCELLED'         => Subscription::STATUS_CANCELLED,
+			'BILLING.SUBSCRIPTION.EXPIRED'           => Subscription::STATUS_EXPIRED,
 		);
 
 		return isset( $map[ $event_type ] )
