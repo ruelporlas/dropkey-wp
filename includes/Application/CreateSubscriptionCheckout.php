@@ -31,11 +31,11 @@ final class CreateSubscriptionCheckout {
 	/**
 	 * Constructor.
 	 *
-	 * @param GatewayManager          $gateways       Gateway manager.
-	 * @param CustomerRepository      $customers      Customer repository.
-	 * @param ProductRepository       $products       Product repository.
-	 * @param PlanRepository          $plans          Plan repository.
-	 * @param SubscriptionRepository  $subscriptions Subscription repository.
+	 * @param GatewayManager         $gateways       Gateway manager.
+	 * @param CustomerRepository     $customers      Customer repository.
+	 * @param ProductRepository      $products       Product repository.
+	 * @param PlanRepository         $plans          Plan repository.
+	 * @param SubscriptionRepository $subscriptions Subscription repository.
 	 */
 	public function __construct(
 		GatewayManager $gateways,
@@ -204,9 +204,9 @@ final class CreateSubscriptionCheckout {
 		);
 
 		if ( $existing_subscription ) {
-			$result['gateway']             = $gateway_id;
-			$result['subscription_id']     = $existing_subscription->get_id();
-			$result['local_subscription']  = $existing_subscription;
+			$result['gateway']            = $gateway_id;
+			$result['subscription_id']    = $existing_subscription->get_id();
+			$result['local_subscription'] = $existing_subscription;
 
 			do_action(
 				'dropkey_wp_subscription_checkout_created',
@@ -219,16 +219,18 @@ final class CreateSubscriptionCheckout {
 
 		$subscription = new Subscription(
 			array(
-				'customer_id'            => $customer->get_id(),
+				'customer_id'             => $customer->get_id(),
 				'product_id'             => $product->get_id(),
-				'plan_id'                => $plan->get_id(),
+				'plan_id'                 => $plan->get_id(),
 				'gateway'                => $gateway_id,
 				'gateway_subscription_id' => $gateway_subscription_id,
 				'status'                 => Subscription::STATUS_PENDING,
-				'current_period_start'  => null,
-				'current_period_end'    => null,
-				'cancel_at_period_end'  => false,
-				'cancelled_at'          => null,
+				'current_period_start'   => null,
+				'current_period_end'     => null,
+				'cancel_at_period_end'   => false,
+				'cancelled_at'           => null,
+				'past_due_at'             => null,
+				'ended_at'                => null,
 			)
 		);
 
@@ -243,13 +245,15 @@ final class CreateSubscriptionCheckout {
 				'customer_id'             => $subscription->get_customer_id(),
 				'product_id'              => $subscription->get_product_id(),
 				'plan_id'                 => $subscription->get_plan_id(),
-				'gateway'                 => $subscription->get_gateway(),
+				'gateway'                => $subscription->get_gateway(),
 				'gateway_subscription_id' => $subscription->get_gateway_subscription_id(),
-				'status'                  => $subscription->get_status(),
+				'status'                 => $subscription->get_status(),
 				'current_period_start'   => $subscription->get_current_period_start(),
 				'current_period_end'     => $subscription->get_current_period_end(),
 				'cancel_at_period_end'   => $subscription->get_cancel_at_period_end(),
 				'cancelled_at'           => $subscription->get_cancelled_at(),
+				'past_due_at'             => null,
+				'ended_at'                => null,
 			)
 		);
 
