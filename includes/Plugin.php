@@ -11,11 +11,11 @@ use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
 use DropKeyWP\Application\ChangeSubscriptionStatus;
+use DropKeyWP\Application\CreateLicense;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
 use DropKeyWP\Application\SynchronizeSubscriptionEntitlement;
-use DropKeyWP\Database\Installer;
 use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\GatewayEventRepository;
@@ -76,12 +76,6 @@ final class Plugin {
 
 		$this->booted = true;
 
-		/*
-		 * Ensure the current database schema is installed before any
-		 * repositories attempt to use it.
-		 */
-		Installer::install();
-
 		global $wpdb;
 
 		$activation_repository         = new ActivationRepository( $wpdb );
@@ -99,12 +93,18 @@ final class Plugin {
 		$gateway_manager = new GatewayManager();
 
 		/*
+		 * License creation for activated subscriptions.
+		 */
+		$create_license = new CreateLicense(
+			$license_repository,
+			$subscription_repository,
+			$product_repository,
+			$plan_repository
+		);
+
+		/*
 		 * Synchronize subscription lifecycle state with its license
 		 * entitlement.
-		 *
-		 * This remains a separate application service. Subscription
-		 * lifecycle services publish their normal lifecycle actions,
-		 * and this service reacts to those actions.
 		 */
 		$synchronize_subscription_entitlement =
 			new SynchronizeSubscriptionEntitlement(
@@ -112,17 +112,33 @@ final class Plugin {
 			);
 
 		/*
+		 * An activated subscription must have a license before its
+		 * entitlement can be synchronized.
+		 */
+		add_action(
+			'dropkey_wp_subscription_activated',
+			array(
+				$create_license,
+				'execute',
+			),
+			10,
+			1
+		);
+
+		/*
 		 * Subscription lifecycle entitlement synchronization.
 		 *
-		 * The synchronization service intentionally handles the
-		 * subscription-to-license mapping and license actions.
+		 * Activation runs after license creation. The other lifecycle
+		 * states only need entitlement synchronization.
 		 */
 		add_action(
 			'dropkey_wp_subscription_activated',
 			array(
 				$synchronize_subscription_entitlement,
 				'execute',
-			)
+			),
+			20,
+			1
 		);
 
 		add_action(
@@ -130,7 +146,9 @@ final class Plugin {
 			array(
 				$synchronize_subscription_entitlement,
 				'execute',
-			)
+			),
+			10,
+			1
 		);
 
 		add_action(
@@ -138,7 +156,9 @@ final class Plugin {
 			array(
 				$synchronize_subscription_entitlement,
 				'execute',
-			)
+			),
+			10,
+			1
 		);
 
 		add_action(
@@ -146,7 +166,9 @@ final class Plugin {
 			array(
 				$synchronize_subscription_entitlement,
 				'execute',
-			)
+			),
+			10,
+			1
 		);
 
 		/*
