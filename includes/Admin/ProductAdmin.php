@@ -95,8 +95,14 @@ final class ProductAdmin {
 			array( $this, 'render_add_product_page' )
 		);
 
+		/*
+		 * Edit Product is intentionally hidden from the sidebar.
+		 *
+		 * The edit screen is accessed through the Edit action
+		 * in the Products list.
+		 */
 		add_submenu_page(
-			'dropkey-wp-products',
+			null,
 			__( 'Edit Product', 'dropkey-wp' ),
 			__( 'Edit Product', 'dropkey-wp' ),
 			'manage_options',
