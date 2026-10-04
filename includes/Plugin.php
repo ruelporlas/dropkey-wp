@@ -10,24 +10,12 @@ namespace DropKeyWP;
 use DropKeyWP\Admin\ProductAdmin;
 use DropKeyWP\Admin\SubscriptionAdmin;
 use DropKeyWP\Admin\TestConsole;
-use DropKeyWP\Application\ActivateLicense;
-use DropKeyWP\Application\ActivateSubscription;
-use DropKeyWP\Application\AuthenticateActivation;
-use DropKeyWP\Application\ChangeSubscriptionStatus;
-use DropKeyWP\Application\CreateCustomer;
-use DropKeyWP\Application\CreateLicense;
-use DropKeyWP\Application\CreatePlan;
-use DropKeyWP\Application\CreateProduct;
-use DropKeyWP\Application\CreateSubscription;
 use DropKeyWP\Application\CreateSubscriptionCheckout;
-use DropKeyWP\Application\DeactivateLicense;
 use DropKeyWP\Application\EnforcePastDueSubscriptions;
 use DropKeyWP\Application\ProcessPaymentEvent;
-use DropKeyWP\Application\SynchronizeSubscriptionEntitlement;
 use DropKeyWP\Database\Repositories\ActivationRepository;
 use DropKeyWP\Database\Repositories\CustomerRepository;
 use DropKeyWP\Database\Repositories\GatewayEventRepository;
-use DropKeyWP\Database\Repositories\GatewayMappingRepository;
 use DropKeyWP\Database\Repositories\LicenseRepository;
 use DropKeyWP\Database\Repositories\PlanRepository;
 use DropKeyWP\Database\Repositories\ProductRepository;
@@ -86,83 +74,38 @@ final class Plugin {
 
 		global $wpdb;
 
-		$activation_repository      = new ActivationRepository( $wpdb );
-		$customer_repository        = new CustomerRepository( $wpdb );
-		$gateway_event_repository   = new GatewayEventRepository( $wpdb );
-		$gateway_mapping_repository = new GatewayMappingRepository( $wpdb );
-		$license_repository         = new LicenseRepository( $wpdb );
-		$plan_repository            = new PlanRepository( $wpdb );
-		$product_repository         = new ProductRepository( $wpdb );
-		$subscription_repository    = new SubscriptionRepository( $wpdb );
+		$activation_repository   = new ActivationRepository( $wpdb );
+		$customer_repository     = new CustomerRepository( $wpdb );
+		$gateway_event_repository = new GatewayEventRepository( $wpdb );
+		$license_repository      = new LicenseRepository( $wpdb );
+		$plan_repository         = new PlanRepository( $wpdb );
+		$product_repository      = new ProductRepository( $wpdb );
+		$subscription_repository = new SubscriptionRepository( $wpdb );
 
+		/*
+		 * Payment gateways register themselves through GatewayManager.
+		 */
 		$gateway_manager = new GatewayManager();
 
-		$create_customer = new CreateCustomer(
-			$customer_repository
-		);
-
-		$create_product = new CreateProduct(
-			$product_repository
-		);
-
-		$create_plan = new CreatePlan(
-			$plan_repository,
-			$product_repository
-		);
-
-		$create_subscription = new CreateSubscription(
-			$subscription_repository,
-			$customer_repository,
-			$product_repository,
-			$plan_repository
-		);
-
-		$change_subscription_status = new ChangeSubscriptionStatus(
-			$subscription_repository
-		);
-
-		$create_license = new CreateLicense(
-			$license_repository,
-			$subscription_repository,
-			$product_repository,
-			$plan_repository
-		);
-
-		$activate_subscription = new ActivateSubscription(
-			$subscription_repository,
-			$license_repository
-		);
-
-		$activate_license = new ActivateLicense(
-			$license_repository,
-			$activation_repository
-		);
-
-		$deactivate_license = new DeactivateLicense(
-			$license_repository,
-			$activation_repository
-		);
-
-		$authenticate_activation = new AuthenticateActivation(
-			$activation_repository,
-			$license_repository
-		);
-
-		$synchronize_subscription_entitlement = new SynchronizeSubscriptionEntitlement(
-			$license_repository
-		);
-
+		/*
+		 * Payment event processing.
+		 */
 		$process_payment_event = new ProcessPaymentEvent(
 			$gateway_event_repository,
 			$subscription_repository,
 			$license_repository
 		);
 
+		/*
+		 * Past-due subscription enforcement.
+		 */
 		$enforce_past_due_subscriptions = new EnforcePastDueSubscriptions(
-			$subscription_repository,
-			$license_repository
+			$subscription_repository
 		);
 
+		/*
+		 * Subscription checkout.
+		 */
 		$create_subscription_checkout = new CreateSubscriptionCheckout(
 			$gateway_manager,
 			$customer_repository,
@@ -171,14 +114,16 @@ final class Plugin {
 			$subscription_repository
 		);
 
+		/*
+		 * REST controllers.
+		 */
 		$checkout_controller = new CheckoutController(
 			$create_subscription_checkout
 		);
 
 		$license_controller = new LicenseController(
-			$activate_license,
-			$deactivate_license,
-			$authenticate_activation
+			$license_repository,
+			$activation_repository
 		);
 
 		$webhook_controller = new WebhookController(
@@ -186,25 +131,48 @@ final class Plugin {
 			$process_payment_event
 		);
 
-		$product_checkout = new ProductCheckout(
-			$product_repository,
-			$plan_repository
+		/*
+		 * REST routes must be registered during rest_api_init.
+		 */
+		add_action(
+			'rest_api_init',
+			array( $checkout_controller, 'register_routes' )
 		);
 
-		$checkout_controller->register();
-		$license_controller->register();
-		$webhook_controller->register();
+		add_action(
+			'rest_api_init',
+			array( $license_controller, 'register_routes' )
+		);
+
+		add_action(
+			'rest_api_init',
+			array( $webhook_controller, 'register_routes' )
+		);
+
+		/*
+		 * Frontend checkout shortcode.
+		 */
+		$product_checkout = new ProductCheckout(
+			$gateway_manager
+		);
+
 		$product_checkout->register();
 
+		/*
+		 * Subscription enforcement hook.
+		 */
 		add_action(
 			'dropkey_wp_enforce_past_due_subscriptions',
 			array( $enforce_past_due_subscriptions, 'execute' )
 		);
 
+		/*
+		 * WordPress admin.
+		 */
 		if ( is_admin() ) {
+
 			$product_admin = new ProductAdmin(
-				$product_repository,
-				$create_product
+				$product_repository
 			);
 
 			$product_admin->register();
@@ -219,29 +187,10 @@ final class Plugin {
 			$subscription_admin->register();
 
 			$test_console = new TestConsole(
-				$customer_repository,
-				$product_repository,
-				$plan_repository,
-				$subscription_repository,
-				$license_repository,
-				$activation_repository,
-				$gateway_event_repository,
-				$gateway_mapping_repository,
-				$gateway_manager,
-				$create_customer,
-				$create_product,
-				$create_plan,
-				$create_subscription,
-				$create_license,
-				$activate_license,
-				$deactivate_license,
-				$synchronize_subscription_entitlement,
-				$enforce_past_due_subscriptions,
-				$process_payment_event
+				$gateway_manager
 			);
 
 			$test_console->register();
 		}
 	}
 }
-
