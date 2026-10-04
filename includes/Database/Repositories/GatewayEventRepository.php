@@ -312,33 +312,47 @@ final class GatewayEventRepository {
 	}
 
 	/**
-	 * Reset an event so it can be processed again.
+	 * Reset a failed event so it can be processed again.
+	 *
+	 * The reset is conditional on the event still being FAILED.
+	 *
+	 * This prevents an older retry request from resetting an event that
+	 * another request has already reset and claimed for processing.
+	 *
+	 * If another request has already advanced the event beyond FAILED,
+	 * the operation is treated as successful because the caller will
+	 * reload the current event state before attempting to claim it.
 	 *
 	 * @param int $id Event ID.
 	 * @return true|\WP_Error
 	 */
 	public function reset_for_retry( $id ) {
+		$id         = absint( $id );
 		$updated_at = current_time( 'mysql', true );
 
-		$updated = $this->wpdb->update(
-			$this->table,
-			array(
-				'status'        => GatewayEvent::STATUS_RECEIVED,
-				'processed_at'  => null,
-				'error_message' => null,
-				'updated_at'    => $updated_at,
-			),
-			array(
-				'id' => absint( $id ),
-			),
-			array(
-				'%s',
-				'%s',
-				'%s',
-				'%s',
-			),
-			array(
-				'%d',
+		if ( $id <= 0 ) {
+			return new \WP_Error(
+				'dropkey_gateway_event_retry_reset_invalid',
+				__(
+					'A valid gateway event ID is required.',
+					'dropkey-wp'
+				)
+			);
+		}
+
+		$updated = $this->wpdb->query(
+			$this->wpdb->prepare(
+				"UPDATE {$this->table}
+				SET status = %s,
+					processed_at = NULL,
+					error_message = NULL,
+					updated_at = %s
+				WHERE id = %d
+				AND status = %s",
+				GatewayEvent::STATUS_RECEIVED,
+				$updated_at,
+				$id,
+				GatewayEvent::STATUS_FAILED
 			)
 		);
 
@@ -355,6 +369,13 @@ final class GatewayEventRepository {
 			);
 		}
 
+		/*
+		 * Zero rows affected is a normal concurrency outcome.
+		 *
+		 * Another request may already have reset the event and moved it
+		 * to RECEIVED or PROCESSING. The caller reloads the row immediately
+		 * afterward, so it will work from the current durable state.
+		 */
 		return true;
 	}
 
