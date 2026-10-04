@@ -16,7 +16,7 @@ final class Schema {
 	 *
 	 * @var int
 	 */
-	public const VERSION = 3;
+	public const VERSION = 4;
 
 	/**
 	 * Get all database table definitions.
@@ -48,6 +48,7 @@ final class Schema {
 				product_id bigint(20) unsigned NOT NULL,
 				name varchar(191) NOT NULL,
 				slug varchar(191) NOT NULL,
+				pricing_type varchar(20) NOT NULL DEFAULT 'paid',
 				price decimal(19,4) NOT NULL,
 				currency char(3) NOT NULL,
 				billing_interval varchar(20) NOT NULL,
@@ -59,6 +60,7 @@ final class Schema {
 				PRIMARY KEY  (id),
 				UNIQUE KEY product_slug (product_id,slug),
 				KEY product_id (product_id),
+				KEY pricing_type (pricing_type),
 				KEY status (status)
 			) {$charset_collate};",
 

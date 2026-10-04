@@ -20,6 +20,20 @@ defined( 'ABSPATH' ) || exit;
 final class PlanAdmin {
 
 	/**
+	 * Plan pricing type.
+	 *
+	 * @var string
+	 */
+	private const PRICING_TYPE_PAID = 'paid';
+
+	/**
+	 * Free plan pricing type.
+	 *
+	 * @var string
+	 */
+	private const PRICING_TYPE_FREE = 'free';
+
+	/**
 	 * Plan repository.
 	 *
 	 * @var PlanRepository
@@ -256,6 +270,10 @@ final class PlanAdmin {
 							</th>
 
 							<th scope="col">
+								<?php echo esc_html__( 'Type', 'dropkey-wp' ); ?>
+							</th>
+
+							<th scope="col">
 								<?php echo esc_html__( 'Slug', 'dropkey-wp' ); ?>
 							</th>
 
@@ -292,6 +310,16 @@ final class PlanAdmin {
 								</td>
 
 								<td>
+									<?php
+									echo esc_html(
+										$this->get_pricing_type_label(
+											$this->get_plan_pricing_type( $plan )
+										)
+									);
+									?>
+								</td>
+
+								<td>
 									<code>
 										<?php echo esc_html( $plan->get_slug() ); ?>
 									</code>
@@ -299,23 +327,37 @@ final class PlanAdmin {
 
 								<td>
 									<?php
-									echo esc_html(
-										$this->format_price(
-											$plan->get_price(),
-											$plan->get_currency()
-										)
-									);
+									if ( $this->is_free_plan( $plan ) ) {
+										echo esc_html__(
+											'Free',
+											'dropkey-wp'
+										);
+									} else {
+										echo esc_html(
+											$this->format_price(
+												$plan->get_price(),
+												$plan->get_currency()
+											)
+										);
+									}
 									?>
 								</td>
 
 								<td>
 									<?php
-									echo esc_html(
-										$this->format_billing(
-											$plan->get_billing_interval(),
-											$plan->get_billing_interval_count()
-										)
-									);
+									if ( $this->is_free_plan( $plan ) ) {
+										echo esc_html__(
+											'No billing',
+											'dropkey-wp'
+										);
+									} else {
+										echo esc_html(
+											$this->format_billing(
+												$plan->get_billing_interval(),
+												$plan->get_billing_interval_count()
+											)
+										);
+									}
 									?>
 								</td>
 
@@ -542,6 +584,7 @@ final class PlanAdmin {
 			'product_id'             => $product_id,
 			'name'                   => '',
 			'slug'                   => '',
+			'pricing_type'           => self::PRICING_TYPE_PAID,
 			'price'                  => '0.0000',
 			'currency'               => 'USD',
 			'billing_interval'       => BillingInterval::MONTH,
@@ -606,6 +649,7 @@ final class PlanAdmin {
 		</div>
 
 		<?php $this->render_plan_slug_script(); ?>
+		<?php $this->render_pricing_type_script(); ?>
 		<?php
 	}
 
@@ -672,6 +716,78 @@ final class PlanAdmin {
 	}
 
 	/**
+	 * Render pricing type behavior for the plan form.
+	 *
+	 * Free plans do not require price or billing interval settings.
+	 *
+	 * @return void
+	 */
+	private function render_pricing_type_script() {
+		?>
+		<script>
+			(function () {
+				const typeField = document.getElementById('dropkey_wp_plan_pricing_type');
+				const priceRow = document.getElementById('dropkey_wp_plan_price_row');
+				const billingRow = document.getElementById('dropkey_wp_plan_billing_interval_row');
+				const countRow = document.getElementById('dropkey_wp_plan_billing_interval_count_row');
+				const priceField = document.getElementById('dropkey_wp_plan_price');
+				const intervalField = document.getElementById('dropkey_wp_plan_billing_interval');
+				const countField = document.getElementById('dropkey_wp_plan_billing_interval_count');
+
+				if (
+					!typeField ||
+					!priceRow ||
+					!billingRow ||
+					!countRow ||
+					!priceField ||
+					!intervalField ||
+					!countField
+				) {
+					return;
+				}
+
+				const updatePricingFields = function () {
+					const isFree = 'free' === typeField.value;
+
+					priceRow.style.display = isFree ? 'none' : '';
+					billingRow.style.display = isFree ? 'none' : '';
+					countRow.style.display = isFree ? 'none' : '';
+
+					priceField.disabled = isFree;
+					intervalField.disabled = isFree;
+					countField.disabled = isFree;
+
+					priceField.required = !isFree;
+					countField.required = !isFree;
+
+					if (isFree) {
+						priceField.value = '0.0000';
+						intervalField.value = '';
+						countField.value = '0';
+					} else {
+						if ('' === priceField.value || '0.0000' === priceField.value) {
+							priceField.value = '0.0000';
+						}
+
+						if ('' === intervalField.value) {
+							intervalField.value = '<?php echo esc_js( BillingInterval::MONTH ); ?>';
+						}
+
+						if ('0' === countField.value || '' === countField.value) {
+							countField.value = '1';
+						}
+					}
+				};
+
+				typeField.addEventListener('change', updatePricingFields);
+
+				updatePricingFields();
+			}());
+		</script>
+		<?php
+	}
+
+	/**
 	 * Render edit plan page.
 	 *
 	 * @return void
@@ -720,6 +836,7 @@ final class PlanAdmin {
 			'product_id'             => $plan->get_product_id(),
 			'name'                   => $plan->get_name(),
 			'slug'                   => $plan->get_slug(),
+			'pricing_type'           => $this->get_plan_pricing_type( $plan ),
 			'price'                  => $plan->get_price(),
 			'currency'               => $plan->get_currency(),
 			'billing_interval'       => $plan->get_billing_interval(),
@@ -789,6 +906,8 @@ final class PlanAdmin {
 				?>
 			</form>
 		</div>
+
+		<?php $this->render_pricing_type_script(); ?>
 		<?php
 	}
 
@@ -806,6 +925,17 @@ final class PlanAdmin {
 		$plan_id = 0
 	) {
 		$is_edit = 'update' === $mode;
+
+		$pricing_type = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
+			: self::PRICING_TYPE_PAID;
+
+		if (
+			self::PRICING_TYPE_FREE !== $pricing_type
+			&& self::PRICING_TYPE_PAID !== $pricing_type
+		) {
+			$pricing_type = self::PRICING_TYPE_PAID;
+		}
 
 		?>
 		<input
@@ -871,6 +1001,47 @@ final class PlanAdmin {
 
 				<tr>
 					<th scope="row">
+						<label for="dropkey_wp_plan_pricing_type">
+							<?php echo esc_html__( 'Plan Type', 'dropkey-wp' ); ?>
+						</label>
+					</th>
+
+					<td>
+						<select
+							name="pricing_type"
+							id="dropkey_wp_plan_pricing_type"
+						>
+							<option
+								value="<?php echo esc_attr( self::PRICING_TYPE_PAID ); ?>"
+								<?php selected( $pricing_type, self::PRICING_TYPE_PAID ); ?>
+							>
+								<?php echo esc_html__( 'Paid', 'dropkey-wp' ); ?>
+							</option>
+
+							<option
+								value="<?php echo esc_attr( self::PRICING_TYPE_FREE ); ?>"
+								<?php selected( $pricing_type, self::PRICING_TYPE_FREE ); ?>
+							>
+								<?php echo esc_html__( 'Free', 'dropkey-wp' ); ?>
+							</option>
+						</select>
+
+						<p class="description">
+							<?php
+							echo esc_html__(
+								'Paid plans require billing information. Free plans are provided without payment or recurring billing.',
+								'dropkey-wp'
+							);
+							?>
+						</p>
+					</td>
+				</tr>
+
+				<tr
+					id="dropkey_wp_plan_price_row"
+					<?php echo self::PRICING_TYPE_FREE === $pricing_type ? ' style="display:none;"' : ''; ?>
+				>
+					<th scope="row">
 						<label for="dropkey_wp_plan_price">
 							<?php echo esc_html__( 'Price', 'dropkey-wp' ); ?>
 						</label>
@@ -884,7 +1055,8 @@ final class PlanAdmin {
 							class="regular-text"
 							inputmode="decimal"
 							value="<?php echo esc_attr( $data['price'] ); ?>"
-							required
+							<?php disabled( self::PRICING_TYPE_FREE === $pricing_type ); ?>
+							<?php echo self::PRICING_TYPE_FREE !== $pricing_type ? 'required' : ''; ?>
 						/>
 					</td>
 				</tr>
@@ -918,7 +1090,10 @@ final class PlanAdmin {
 					</td>
 				</tr>
 
-				<tr>
+				<tr
+					id="dropkey_wp_plan_billing_interval_row"
+					<?php echo self::PRICING_TYPE_FREE === $pricing_type ? ' style="display:none;"' : ''; ?>
+				>
 					<th scope="row">
 						<label for="dropkey_wp_plan_billing_interval">
 							<?php echo esc_html__( 'Billing Interval', 'dropkey-wp' ); ?>
@@ -929,7 +1104,12 @@ final class PlanAdmin {
 						<select
 							name="billing_interval"
 							id="dropkey_wp_plan_billing_interval"
+							<?php disabled( self::PRICING_TYPE_FREE === $pricing_type ); ?>
 						>
+							<option value="">
+								<?php echo esc_html__( 'Select interval', 'dropkey-wp' ); ?>
+							</option>
+
 							<?php foreach ( BillingInterval::all() as $interval ) : ?>
 
 								<option
@@ -948,7 +1128,10 @@ final class PlanAdmin {
 					</td>
 				</tr>
 
-				<tr>
+				<tr
+					id="dropkey_wp_plan_billing_interval_count_row"
+					<?php echo self::PRICING_TYPE_FREE === $pricing_type ? ' style="display:none;"' : ''; ?>
+				>
 					<th scope="row">
 						<label for="dropkey_wp_plan_billing_interval_count">
 							<?php echo esc_html__( 'Interval Count', 'dropkey-wp' ); ?>
@@ -964,7 +1147,8 @@ final class PlanAdmin {
 							min="1"
 							step="1"
 							value="<?php echo esc_attr( $data['billing_interval_count'] ); ?>"
-							required
+							<?php disabled( self::PRICING_TYPE_FREE === $pricing_type ); ?>
+							<?php echo self::PRICING_TYPE_FREE !== $pricing_type ? 'required' : ''; ?>
 						/>
 
 						<p class="description">
@@ -1287,6 +1471,43 @@ final class PlanAdmin {
 	 * @return array
 	 */
 	private function get_post_form_data() {
+		$pricing_type = isset( $_POST['pricing_type'] )
+			? sanitize_key(
+				wp_unslash( $_POST['pricing_type'] )
+			)
+			: self::PRICING_TYPE_PAID;
+
+		if (
+			self::PRICING_TYPE_FREE !== $pricing_type
+			&& self::PRICING_TYPE_PAID !== $pricing_type
+		) {
+			$pricing_type = self::PRICING_TYPE_PAID;
+		}
+
+		$price = isset( $_POST['price'] )
+			? trim(
+				wp_unslash( $_POST['price'] )
+			)
+			: '';
+
+		$billing_interval = isset( $_POST['billing_interval'] )
+			? sanitize_key(
+				wp_unslash( $_POST['billing_interval'] )
+			)
+			: '';
+
+		$billing_interval_count = isset( $_POST['billing_interval_count'] )
+			? absint(
+				$_POST['billing_interval_count']
+			)
+			: 0;
+
+		if ( self::PRICING_TYPE_FREE === $pricing_type ) {
+			$price                  = '0.0000';
+			$billing_interval       = '';
+			$billing_interval_count = 0;
+		}
+
 		return array(
 			'product_id' => isset( $_POST['product_id'] )
 				? absint(
@@ -1306,11 +1527,9 @@ final class PlanAdmin {
 				)
 				: '',
 
-			'price' => isset( $_POST['price'] )
-				? trim(
-					wp_unslash( $_POST['price'] )
-				)
-				: '',
+			'pricing_type' => $pricing_type,
+
+			'price' => $price,
 
 			'currency' => isset( $_POST['currency'] )
 				? strtoupper(
@@ -1320,17 +1539,9 @@ final class PlanAdmin {
 				)
 				: '',
 
-			'billing_interval' => isset( $_POST['billing_interval'] )
-				? sanitize_key(
-					wp_unslash( $_POST['billing_interval'] )
-				)
-				: '',
+			'billing_interval' => $billing_interval,
 
-			'billing_interval_count' => isset( $_POST['billing_interval_count'] )
-				? absint(
-					$_POST['billing_interval_count']
-				)
-				: 0,
+			'billing_interval_count' => $billing_interval_count,
 
 			'activation_limit' => isset( $_POST['activation_limit'] )
 				? absint(
@@ -1654,6 +1865,59 @@ final class PlanAdmin {
 		return isset( $labels[ $status ] )
 			? $labels[ $status ]
 			: $status;
+	}
+
+	/**
+	 * Get human-readable pricing type label.
+	 *
+	 * @param string $pricing_type Pricing type.
+	 * @return string
+	 */
+	private function get_pricing_type_label( $pricing_type ) {
+		$labels = array(
+			self::PRICING_TYPE_PAID => __( 'Paid', 'dropkey-wp' ),
+			self::PRICING_TYPE_FREE => __( 'Free', 'dropkey-wp' ),
+		);
+
+		return isset( $labels[ $pricing_type ] )
+			? $labels[ $pricing_type ]
+			: $pricing_type;
+	}
+
+	/**
+	 * Get the plan pricing type.
+	 *
+	 * Uses the new pricing type when available and falls back to paid for
+	 * existing plans that do not yet expose the property.
+	 *
+	 * @param object $plan Plan object.
+	 * @return string
+	 */
+	private function get_plan_pricing_type( $plan ) {
+		if ( is_object( $plan ) && method_exists( $plan, 'get_pricing_type' ) ) {
+			$pricing_type = sanitize_key(
+				$plan->get_pricing_type()
+			);
+
+			if (
+				self::PRICING_TYPE_FREE === $pricing_type
+				|| self::PRICING_TYPE_PAID === $pricing_type
+			) {
+				return $pricing_type;
+			}
+		}
+
+		return self::PRICING_TYPE_PAID;
+	}
+
+	/**
+	 * Determine whether a plan is free.
+	 *
+	 * @param object $plan Plan object.
+	 * @return bool
+	 */
+	private function is_free_plan( $plan ) {
+		return self::PRICING_TYPE_FREE === $this->get_plan_pricing_type( $plan );
 	}
 
 	/**

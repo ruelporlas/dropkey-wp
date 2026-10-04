@@ -26,6 +26,20 @@ final class Plan {
 	public const STATUS_ARCHIVED = 'archived';
 
 	/**
+	 * Free pricing type.
+	 *
+	 * @var string
+	 */
+	public const PRICING_TYPE_FREE = 'free';
+
+	/**
+	 * Paid pricing type.
+	 *
+	 * @var string
+	 */
+	public const PRICING_TYPE_PAID = 'paid';
+
+	/**
 	 * Supported billing intervals.
 	 *
 	 * @var string
@@ -74,6 +88,13 @@ final class Plan {
 	 * @var string
 	 */
 	private $slug;
+
+	/**
+	 * Pricing type.
+	 *
+	 * @var string
+	 */
+	private $pricing_type;
 
 	/**
 	 * Plan price.
@@ -143,6 +164,9 @@ final class Plan {
 		$this->product_id             = isset( $data['product_id'] ) ? (int) $data['product_id'] : 0;
 		$this->name                   = isset( $data['name'] ) ? (string) $data['name'] : '';
 		$this->slug                   = isset( $data['slug'] ) ? (string) $data['slug'] : '';
+		$this->pricing_type           = isset( $data['pricing_type'] )
+			? sanitize_key( $data['pricing_type'] )
+			: self::PRICING_TYPE_PAID;
 		$this->price                  = isset( $data['price'] ) ? (string) $data['price'] : '0.0000';
 		$this->currency               = isset( $data['currency'] ) ? strtoupper( (string) $data['currency'] ) : '';
 		$this->billing_interval       = isset( $data['billing_interval'] ) ? (string) $data['billing_interval'] : '';
@@ -155,8 +179,8 @@ final class Plan {
 		$this->status                 = isset( $data['status'] )
 			? (string) $data['status']
 			: self::STATUS_ACTIVE;
-		$this->created_at              = isset( $data['created_at'] ) ? (string) $data['created_at'] : '';
-		$this->updated_at              = isset( $data['updated_at'] ) ? (string) $data['updated_at'] : '';
+		$this->created_at             = isset( $data['created_at'] ) ? (string) $data['created_at'] : '';
+		$this->updated_at             = isset( $data['updated_at'] ) ? (string) $data['updated_at'] : '';
 	}
 
 	/**
@@ -188,10 +212,44 @@ final class Plan {
 			);
 		}
 
+		if ( ! in_array(
+			$this->pricing_type,
+			array(
+				self::PRICING_TYPE_FREE,
+				self::PRICING_TYPE_PAID,
+			),
+			true
+		) ) {
+			$errors->add(
+				'dropkey_plan_pricing_type_invalid',
+				__( 'Plan pricing type is invalid.', 'dropkey-wp' )
+			);
+		}
+
 		if ( ! preg_match( '/^\d+(?:\.\d{1,4})?$/', $this->price ) ) {
 			$errors->add(
 				'dropkey_plan_price_invalid',
 				__( 'Plan price must be a valid non-negative amount.', 'dropkey-wp' )
+			);
+		}
+
+		if (
+			self::PRICING_TYPE_FREE === $this->pricing_type
+			&& '0.0000' !== number_format( (float) $this->price, 4, '.', '' )
+		) {
+			$errors->add(
+				'dropkey_plan_free_price_invalid',
+				__( 'A free plan must have a price of zero.', 'dropkey-wp' )
+			);
+		}
+
+		if (
+			self::PRICING_TYPE_PAID === $this->pricing_type
+			&& (float) $this->price <= 0
+		) {
+			$errors->add(
+				'dropkey_plan_paid_price_invalid',
+				__( 'A paid plan must have a price greater than zero.', 'dropkey-wp' )
 			);
 		}
 
@@ -202,27 +260,29 @@ final class Plan {
 			);
 		}
 
-		if ( ! in_array(
-			$this->billing_interval,
-			array(
-				self::INTERVAL_DAY,
-				self::INTERVAL_WEEK,
-				self::INTERVAL_MONTH,
-				self::INTERVAL_YEAR,
-			),
-			true
-		) ) {
-			$errors->add(
-				'dropkey_plan_billing_interval_invalid',
-				__( 'Billing interval is invalid.', 'dropkey-wp' )
-			);
-		}
+		if ( self::PRICING_TYPE_PAID === $this->pricing_type ) {
+			if ( ! in_array(
+				$this->billing_interval,
+				array(
+					self::INTERVAL_DAY,
+					self::INTERVAL_WEEK,
+					self::INTERVAL_MONTH,
+					self::INTERVAL_YEAR,
+				),
+				true
+			) ) {
+				$errors->add(
+					'dropkey_plan_billing_interval_invalid',
+					__( 'Billing interval is invalid.', 'dropkey-wp' )
+				);
+			}
 
-		if ( $this->billing_interval_count < 1 ) {
-			$errors->add(
-				'dropkey_plan_billing_interval_count_invalid',
-				__( 'Billing interval count must be at least 1.', 'dropkey-wp' )
-			);
+			if ( $this->billing_interval_count < 1 ) {
+				$errors->add(
+					'dropkey_plan_billing_interval_count_invalid',
+					__( 'Billing interval count must be at least 1.', 'dropkey-wp' )
+				);
+			}
 		}
 
 		if ( $this->activation_limit < 1 ) {
@@ -253,6 +313,24 @@ final class Plan {
 		return true;
 	}
 
+	/**
+	 * Determine whether this is a free plan.
+	 *
+	 * @return bool
+	 */
+	public function is_free() {
+		return self::PRICING_TYPE_FREE === $this->pricing_type;
+	}
+
+	/**
+	 * Determine whether this is a paid plan.
+	 *
+	 * @return bool
+	 */
+	public function is_paid() {
+		return self::PRICING_TYPE_PAID === $this->pricing_type;
+	}
+
 	public function get_id() {
 		return $this->id;
 	}
@@ -267,6 +345,10 @@ final class Plan {
 
 	public function get_slug() {
 		return $this->slug;
+	}
+
+	public function get_pricing_type() {
+		return $this->pricing_type;
 	}
 
 	public function get_price() {
