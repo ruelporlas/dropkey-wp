@@ -20,6 +20,12 @@ final class ActivateLicense {
 
 	private $activations;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param LicenseRepository    $licenses    License repository.
+	 * @param ActivationRepository $activations Activation repository.
+	 */
 	public function __construct(
 		LicenseRepository $licenses,
 		ActivationRepository $activations
@@ -32,7 +38,7 @@ final class ActivateLicense {
 	 * Activate a license for a site.
 	 *
 	 * @param int    $license_id License ID.
-	 * @param string $site_url Site URL.
+	 * @param string $site_url   Site URL.
 	 * @return array|\WP_Error
 	 */
 	public function execute( $license_id, $site_url ) {
@@ -66,6 +72,17 @@ final class ActivateLicense {
 			return new \WP_Error(
 				'dropkey_license_not_active',
 				__( 'The license is not active.', 'dropkey-wp' )
+			);
+		}
+
+		/*
+		 * An active status alone is not sufficient for activation.
+		 * The license must also have a current entitlement period.
+		 */
+		if ( $this->has_expired( $license->get_expires_at() ) ) {
+			return new \WP_Error(
+				'dropkey_license_expired',
+				__( 'The license has expired.', 'dropkey-wp' )
 			);
 		}
 
@@ -125,12 +142,17 @@ final class ActivateLicense {
 			);
 		}
 
-		$active_count = $this->activations->count_active_by_license( $license_id );
+		$active_count = $this->activations->count_active_by_license(
+			$license_id
+		);
 
 		if ( $active_count >= $license->get_activation_limit() ) {
 			return new \WP_Error(
 				'dropkey_activation_limit_reached',
-				__( 'The activation limit for this license has been reached.', 'dropkey-wp' )
+				__(
+					'The activation limit for this license has been reached.',
+					'dropkey-wp'
+				)
 			);
 		}
 
@@ -193,6 +215,26 @@ final class ActivateLicense {
 	}
 
 	/**
+	 * Determine whether a license expiration date has passed.
+	 *
+	 * @param string $expires_at Expiration timestamp.
+	 * @return bool
+	 */
+	private function has_expired( $expires_at ) {
+		if ( '' === $expires_at ) {
+			return false;
+		}
+
+		$expires_timestamp = strtotime( $expires_at );
+
+		if ( false === $expires_timestamp ) {
+			return false;
+		}
+
+		return $expires_timestamp < current_time( 'timestamp', true );
+	}
+
+	/**
 	 * Generate a cryptographically secure API token.
 	 *
 	 * @return string|\WP_Error
@@ -203,7 +245,10 @@ final class ActivateLicense {
 		} catch ( \Exception $exception ) {
 			return new \WP_Error(
 				'dropkey_activation_token_generation_failed',
-				__( 'A secure activation token could not be generated.', 'dropkey-wp' )
+				__(
+					'A secure activation token could not be generated.',
+					'dropkey-wp'
+				)
 			);
 		}
 	}
