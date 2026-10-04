@@ -59,6 +59,11 @@ final class ChangeSubscriptionStatus {
 	/**
 	 * Execute a subscription status change.
 	 *
+	 * A subscription-specific database advisory lock serializes concurrent
+	 * lifecycle transitions for the same subscription. This prevents two
+	 * simultaneous webhook requests from both evaluating the same old
+	 * status and then overwriting each other's lifecycle state.
+	 *
 	 * @param int    $subscription_id Subscription ID.
 	 * @param string $new_status      New status.
 	 * @return Subscription|\WP_Error Updated subscription or error.
@@ -103,102 +108,173 @@ final class ChangeSubscriptionStatus {
 			);
 		}
 
-		$current_status = $subscription->get_status();
+		global $wpdb;
 
-		/*
-		 * A request to set the subscription to its existing status
-		 * is intentionally idempotent.
-		 */
-		if ( $current_status === $new_status ) {
-			return $subscription;
-		}
+		$lock_name = $this->get_lock_name( $subscription_id );
 
-		if (
-			! $this->is_transition_allowed(
-				$current_status,
-				$new_status
+		$lock_acquired = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT GET_LOCK(%s, %d)',
+				$lock_name,
+				10
 			)
-		) {
+		);
+
+		if ( '1' !== (string) $lock_acquired ) {
 			return new \WP_Error(
-				'dropkey_subscription_transition_not_allowed',
+				'dropkey_subscription_status_lock_failed',
 				__(
-					'This subscription status transition is not allowed.',
+					'The subscription is currently being updated. Please try again.',
 					'dropkey-wp'
-				),
-				array(
-					'current_status' => $current_status,
-					'new_status'     => $new_status,
 				)
 			);
 		}
 
-		$updated = $this->subscriptions->update_status(
-			$subscription_id,
-			$new_status
-		);
-
-		if ( is_wp_error( $updated ) ) {
-			return $updated;
-		}
-
-		if ( Subscription::STATUS_PAST_DUE === $new_status ) {
-			$past_due_at = $subscription->get_past_due_at();
-
-			if (
-				empty( $past_due_at )
-				|| '0000-00-00 00:00:00' === $past_due_at
-			) {
-				$past_due_result = $this->subscriptions->mark_past_due(
-					$subscription_id,
-					current_time( 'mysql', true )
-				);
-
-				if ( is_wp_error( $past_due_result ) ) {
-					return $past_due_result;
-				}
-			}
-		}
-
-		if ( Subscription::STATUS_ACTIVE === $new_status ) {
-			$clear_result = $this->subscriptions->clear_past_due(
+		try {
+			/*
+			 * Reload after acquiring the lock. The status read before the
+			 * lock may already be stale if another request completed a
+			 * transition while this request was waiting.
+			 */
+			$subscription = $this->subscriptions->find(
 				$subscription_id
 			);
 
-			if ( is_wp_error( $clear_result ) ) {
-				return $clear_result;
+			if ( ! $subscription ) {
+				return new \WP_Error(
+					'dropkey_subscription_not_found',
+					__( 'The subscription does not exist.', 'dropkey-wp' )
+				);
 			}
-		}
 
-		$updated_subscription = $this->subscriptions->find(
-			$subscription_id
-		);
+			$current_status = $subscription->get_status();
 
-		if ( ! $updated_subscription ) {
-			return new \WP_Error(
-				'dropkey_subscription_reload_failed',
-				__(
-					'The updated subscription could not be reloaded.',
-					'dropkey-wp'
+			/*
+			 * A request to set the subscription to its existing status
+			 * is intentionally idempotent.
+			 *
+			 * This check must happen after acquiring the lock so a request
+			 * that was waiting behind another transition does not fire a
+			 * duplicate lifecycle action.
+			 */
+			if ( $current_status === $new_status ) {
+				return $subscription;
+			}
+
+			if (
+				! $this->is_transition_allowed(
+					$current_status,
+					$new_status
+				)
+			) {
+				return new \WP_Error(
+					'dropkey_subscription_transition_not_allowed',
+					__(
+						'This subscription status transition is not allowed.',
+						'dropkey-wp'
+					),
+					array(
+						'current_status' => $current_status,
+						'new_status'     => $new_status,
+					)
+				);
+			}
+
+			$updated = $this->subscriptions->update_status(
+				$subscription_id,
+				$new_status
+			);
+
+			if ( is_wp_error( $updated ) ) {
+				return $updated;
+			}
+
+			if ( Subscription::STATUS_PAST_DUE === $new_status ) {
+				$past_due_at = $subscription->get_past_due_at();
+
+				if (
+					empty( $past_due_at )
+					|| '0000-00-00 00:00:00' === $past_due_at
+				) {
+					$past_due_result = $this->subscriptions->mark_past_due(
+						$subscription_id,
+						current_time( 'mysql', true )
+					);
+
+					if ( is_wp_error( $past_due_result ) ) {
+						return $past_due_result;
+					}
+				}
+			}
+
+			if ( Subscription::STATUS_ACTIVE === $new_status ) {
+				$clear_result = $this->subscriptions->clear_past_due(
+					$subscription_id
+				);
+
+				if ( is_wp_error( $clear_result ) ) {
+					return $clear_result;
+				}
+			}
+
+			$updated_subscription = $this->subscriptions->find(
+				$subscription_id
+			);
+
+			if ( ! $updated_subscription ) {
+				return new \WP_Error(
+					'dropkey_subscription_reload_failed',
+					__(
+						'The updated subscription could not be reloaded.',
+						'dropkey-wp'
+					)
+				);
+			}
+
+			/*
+			 * Record the lifecycle transition after the subscription has
+			 * successfully reached its new state.
+			 *
+			 * Audit logging must not make an otherwise successful status
+			 * change appear to have failed.
+			 */
+			$this->record_status_change(
+				$subscription_id,
+				$current_status,
+				$new_status
+			);
+
+			/*
+			 * Fire the lifecycle action while the subscription lock is
+			 * still held. This keeps the status transition and its immediate
+			 * entitlement/license synchronization serialized for this
+			 * subscription.
+			 */
+			$this->fire_status_action( $updated_subscription );
+
+			return $updated_subscription;
+		} finally {
+			/*
+			 * GET_LOCK() is connection-scoped, so release it through the
+			 * same $wpdb connection that acquired it.
+			 */
+			$wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT RELEASE_LOCK(%s)',
+					$lock_name
 				)
 			);
 		}
+	}
 
-		/*
-		 * Record the lifecycle transition after the subscription has
-		 * successfully reached its new state.
-		 *
-		 * Audit logging must not make an otherwise successful status
-		 * change appear to have failed.
-		 */
-		$this->record_status_change(
-			$subscription_id,
-			$current_status,
-			$new_status
-		);
-
-		$this->fire_status_action( $updated_subscription );
-
-		return $updated_subscription;
+	/**
+	 * Build the advisory lock name for a subscription.
+	 *
+	 * @param int $subscription_id Subscription ID.
+	 * @return string
+	 */
+	private function get_lock_name( $subscription_id ) {
+		return 'dropkey_subscription_status_' . absint( $subscription_id );
 	}
 
 	/**
